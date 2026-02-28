@@ -1,0 +1,136 @@
+@import "tailwindcss";
+
+/* Nepal Election Dashboard - Civic Design System
+   Clean, neutral, government-inspired palette
+   All colors in HSL format
+*/
+
+@layer base {
+  :root {
+    /* Core backgrounds */
+    --background: 45 30% 97%;
+    --foreground: 215 35% 15%;
+
+    /* Cards with warm cream tone */
+    --card: 45 40% 99%;
+    --card-foreground: 215 35% 15%;
+
+    /* Popovers and overlays */
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 35% 15%;
+
+    /* Primary - Deep Government Blue */
+    --primary: 215 55% 25%;
+    --primary-foreground: 45 30% 97%;
+
+    /* Secondary - Warm Neutral */
+    --secondary: 35 25% 92%;
+    --secondary-foreground: 215 35% 20%;
+
+    /* Muted - Soft backgrounds */
+    --muted: 35 20% 94%;
+    --muted-foreground: 215 15% 45%;
+
+    /* Accent - Nepal Crimson (subtle) */
+    --accent: 350 65% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Success - Green for positive stats */
+    --success: 160 60% 40%;
+    --success-foreground: 0 0% 100%;
+
+    /* Warning - Amber */
+    --warning: 40 95% 50%;
+    --warning-foreground: 215 35% 15%;
+
+    /* Destructive */
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Borders and inputs */
+    --border: 35 20% 88%;
+    --input: 35 20% 90%;
+    --ring: 215 55% 25%;
+
+    --radius: 0.75rem;
+
+    /* Custom gradients */
+    --gradient-hero: linear-gradient(135deg, hsl(215 55% 25%) 0%, hsl(215 45% 35%) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(45 40% 99%) 0%, hsl(35 25% 96%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(350 65% 50%) 0%, hsl(350 55% 60%) 100%);
+  }
+}
+
+@layer base {
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Nepali text optimization */
+  .nepali-text {
+    font-family: 'Noto Sans Devanagari', 'Mukta', system-ui, sans-serif;
+    line-height: 1.6;
+  }
+
+  /* Large text for names */
+  .text-name {
+    font-size: 1.125rem;
+    line-height: 1.75rem;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+  }
+}
+
+@layer components {
+  /* Stat card variants */
+  .stat-card {
+    background-color: hsl(var(--card));
+    border-radius: 0.75rem;
+    border: 1px solid hsl(var(--border));
+    padding: 1.25rem;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    transition-property: all;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 200ms;
+  }
+  
+  .stat-card:hover {
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    border-color: hsl(var(--primary) / 0.2);
+  }
+
+  /* Candidate card */
+  .candidate-card {
+    background-color: hsl(var(--card));
+    border-radius: 0.75rem;
+    border: 1px solid hsl(var(--border));
+    padding: 1rem;
+    transition-property: all;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 200ms;
+    cursor: pointer;
+  }
+  
+  .candidate-card:hover {
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    border-color: hsl(var(--primary) / 0.3);
+    transform: translateY(-0.125rem);
+  }
+
+  /* Badge variants */
+  .badge-party {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding-left: 0.625rem;
+    padding-right: 0.625rem;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 500;
+  }
+}
