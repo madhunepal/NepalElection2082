@@ -12,77 +12,44 @@ if (!supabaseUrl || !supabaseKey) {
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const partyColorMap: Record<string, string> = {
-  "नेपाली काँग्रेस": "bg-green-100 text-green-800 border-green-200",
-  "नेपाल कम्युनिष्ट पार्टी (एकीकृत मार्क्सवादी लेनिनवादी)": "bg-red-100 text-red-800 border-red-200",
-  "नेकपा एमाले": "bg-red-100 text-red-800 border-red-200", // Handle abbreviation
-  "नेपाल कम्युनिष्ट पार्टी (माओवादी केन्द्र)": "bg-rose-100 text-rose-800 border-rose-200",
-  "राष्ट्रिय स्वतन्त्र पार्टी": "bg-blue-100 text-blue-800 border-blue-200",
-  "राष्ट्रिय प्रजातन्त्र पार्टी": "bg-purple-100 text-purple-800 border-purple-200",
-  "जनता समाजवादी पार्टी, नेपाल": "bg-green-100 text-green-800 border-green-200",
-  "स्वतन्त्र": "bg-gray-100 text-gray-800 border-gray-200",
-};
-
-// We don't need candidate list filters on the dashboard page anymore, just the raw stats
-const { count: totalCount } = await supabase
-  .from('candidates')
-  .select('candidate_id', { count: 'exact', head: true });
-
-
-// Unique provinces
-const { data: provincesData } = await supabase
-  .from('candidates')
-  .select('province')
-  .not('province', 'is', null)
-  .limit(10000);
-
-const uniqueProvinces = [...new Set(provincesData?.map(p => p.province) || [])].sort();
-
-// Unique districts
-const { data: districtsData } = await supabase
-  .from('candidates')
-  .select('district')
-  .not('district', 'is', null)
-  .limit(10000);
-
-const uniqueDistricts = [...new Set(districtsData?.map(d => d.district) || [])].sort();
-
-// Unique parties
-const { data: partiesData } = await supabase
-  .from('candidates')
-  .select('party')
-  .not('party', 'is', null)
-  .limit(10000);
-
-const uniqueParties = [...new Set(partiesData?.map(p => p.party) || [])].sort();
-
-// We need overall totals for the Statistics Cards. Let's fetch the counts using a very light query.
-let totalCandidatesCount = totalCount || 0;
-let totalUniquePartiesCount = 66; // Hardcoded per user request
-let totalUniqueProvincesCount = 7; // Hardcoded per user request
-// Hardcoded 77 Districts for Nepal as it is a constant, or we could fetch it if there was a district column
-let totalDistrictsCount = 77;
-
+// URL params
+const url = new URL(Astro.request.url);
 // Prepare Data for Charts (Party Distribution & Qualification)
-// We will aggregate this from the database for the *entire* dataset regardless of filters, 
-// matching how the original dashboard analysis section behaves.
-const { data: allCandidatesForCharts } = await supabase
-  .from('candidates')
-  .select('party, qualification')
-  .limit(10000); // Fetch all to aggregate
+async function fetchAllChartData() {
+  let allData: any[] = [];
+  let page = 0;
+  const pageSize = 1000;
+  while(true) {
+    const { data } = await supabase
+      .from('candidates')
+      .select('party, qualification, province')
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+      
+    if (!data || data.length === 0) break;
+    allData = allData.concat(data);
+    if (data.length < pageSize) break;
+    page++;
+  }
+  return allData;
+}
+
+const allCandidatesForCharts = await fetchAllChartData();
 
 const partyCounts: Record<string, number> = {};
 const qualificationCounts: Record<string, number> = {};
+const provinceCounts: Record<string, number> = {};
 
 if (allCandidatesForCharts) {
   allCandidatesForCharts.forEach(c => {
     if (c.party) {
       partyCounts[c.party] = (partyCounts[c.party] || 0) + 1;
     }
-    // Handle specific mappings for Qualifications based on original data (sometimes numeric or unstructured)
-    // Using simple mapping based on source code grouping
+    
+    if (c.province) {
+      provinceCounts[c.province] = (provinceCounts[c.province] || 0) + 1;
+    }
+
     let qual = c.qualification || 'Other';
-    // Clean up obvious synonyms based on screenshots
     if (qual.includes('Class 10') || qual.includes('S.L.C.') || qual.includes('SEE')) qual = 'SLC / SEE';
     if (qual.includes('10+2') || qual.includes('Certificate') || qual.includes('Intermediate')) qual = '+2 / Diploma';
     if (qual.includes('Bachelor')) qual = 'Bachelors';
@@ -95,17 +62,18 @@ if (allCandidatesForCharts) {
   });
 }
 
-// Convert objects to arrays for Chart.js sorting
 const partyChartData = Object.entries(partyCounts)
   .map(([name, value]) => ({ name, value }))
   .sort((a, b) => b.value - a.value)
-  .slice(0, 10); // Show top 10
+  .slice(0, 10);
 
 const qualChartData = Object.entries(qualificationCounts)
   .map(([name, value]) => ({ name, value }))
   .sort((a, b) => b.value - a.value);
 
-
+const provinceChartData = Object.entries(provinceCounts)
+  .map(([name, value]) => ({ name, value }))
+  .sort((a, b) => b.value - a.value);
 ---
 
 <html lang="ne">
@@ -120,71 +88,21 @@ const qualChartData = Object.entries(qualificationCounts)
   <body class="bg-background min-h-screen font-sans antialiased text-foreground">
     
     <!-- Navigation Header -->
-    <Header activeTab="dashboard" />
+    <Header activeTab="analysis" />
 
     <main class="container mx-auto px-4 py-8">
       
       <div class="mb-8">
         <h1 class="text-3xl md:text-4xl font-bold tracking-tight mb-2 nepali-text text-foreground">
-          नेपाल निर्वाचन उम्मेदवार
+          विश्लेषण (Analysis)
         </h1>
         <p class="text-muted-foreground">
-          Nepal Election Candidates Dashboard<br/>
-          <span class="text-sm">जिल्ला, प्रदेश, र पार्टी अनुसार उम्मेदवारहरू खोज्नुहोस् • Explore candidates by district, province, and party</span>
+          तथ्याङ्क र चार्टहरू • Visualized Election Data Insights
         </p>
       </div>
 
-      <!-- Global Statistics Cards (4 Columns) -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <div class="stat-card flex justify-between items-start">
-          <div>
-            <p class="text-sm text-foreground/80 font-semibold nepali-text">कुल उम्मेदवार</p>
-            <p class="text-xs text-muted-foreground mb-2">Total Candidates</p>
-            <p class="text-4xl font-bold text-foreground">{totalCandidatesCount.toLocaleString()}</p>
-          </div>
-          <div class="bg-secondary p-3 rounded-xl text-muted-foreground">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          </div>
-        </div>
-
-        <div class="stat-card flex justify-between items-start">
-          <div>
-            <p class="text-sm text-foreground/80 font-semibold nepali-text">राजनीतिक दलहरू</p>
-            <p class="text-xs text-muted-foreground mb-2">Political Parties</p>
-            <p class="text-4xl font-bold text-foreground">{totalUniquePartiesCount}</p>
-          </div>
-          <div class="bg-secondary p-3 rounded-xl text-muted-foreground">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
-          </div>
-        </div>
-
-        <div class="stat-card flex justify-between items-start">
-          <div>
-             <p class="text-sm text-foreground/80 font-semibold nepali-text">जिल्लाहरू</p>
-             <p class="text-xs text-muted-foreground mb-2">Districts</p>
-             <p class="text-4xl font-bold text-foreground">{totalDistrictsCount}</p>
-          </div>
-          <div class="bg-secondary p-3 rounded-xl text-muted-foreground">
-             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-          </div>
-        </div>
-
-        <div class="stat-card flex justify-between items-start">
-          <div>
-             <p class="text-sm text-foreground/80 font-semibold nepali-text">प्रदेशहरू</p>
-             <p class="text-xs text-muted-foreground mb-2">Provinces</p>
-             <p class="text-4xl font-bold text-foreground">{totalUniqueProvincesCount}</p>
-          </div>
-          <div class="bg-secondary p-3 rounded-xl text-muted-foreground">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-          </div>
-        </div>
-      </div>
-
-
-
       <!-- Analysis Charts Section -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8 mb-12">
         <!-- Party Chart -->
         <div class="bg-card border border-border rounded-xl p-6 shadow-sm">
           <div class="mb-6">
@@ -196,8 +114,19 @@ const qualChartData = Object.entries(qualificationCounts)
           </div>
         </div>
 
-        <!-- Qualification Chart -->
+        <!-- Province Chart -->
         <div class="bg-card border border-border rounded-xl p-6 shadow-sm">
+          <div class="mb-6">
+            <h3 class="font-semibold text-foreground text-lg nepali-text">प्रदेश अनुसार उम्मेदवार</h3>
+            <p class="text-xs text-muted-foreground">Candidates by Province</p>
+          </div>
+          <div class="h-80 w-full relative">
+            <canvas id="provinceChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Qualification Chart -->
+        <div class="bg-card border border-border rounded-xl p-6 shadow-sm lg:col-span-2 lg:w-1/2 lg:mx-auto w-full">
           <div class="mb-6">
             <h3 class="font-semibold text-foreground text-lg nepali-text">शैक्षिक योग्यता</h3>
             <p class="text-xs text-muted-foreground">Qualification Distribution</p>
@@ -208,7 +137,7 @@ const qualChartData = Object.entries(qualificationCounts)
         </div>
       </div>
     </main>
-    <script is:inline define:vars={{ partyChartData, qualChartData }}>
+    <script is:inline define:vars={{ partyChartData, qualChartData, provinceChartData }}>
       // -----------------------------
       // Chart.js Configuration
       // -----------------------------
@@ -334,6 +263,54 @@ const qualChartData = Object.entries(qualificationCounts)
                       return ` ${value.toLocaleString()} (${percentage}%)`;
                     }
                   }
+                }
+              }
+            }
+          });
+        }
+        // 3. Province Bar Chart (Horizontal)
+        const ctxProvince = document.getElementById('provinceChart');
+        if (ctxProvince && provinceChartData.length > 0) {
+          const labels = provinceChartData.map(d => d.name);
+          const data = provinceChartData.map(d => d.value);
+
+          new Chart(ctxProvince, {
+            type: 'bar',
+            data: {
+              labels: labels,
+              datasets: [{
+                data: data,
+                backgroundColor: CHART_COLORS,
+                borderWidth: 0,
+                borderRadius: 4,
+                barPercentage: 0.6
+              }]
+            },
+            options: {
+              indexAxis: 'y', // Horizontal
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                  titleColor: '#000',
+                  bodyColor: '#333',
+                  borderColor: '#e2e8f0',
+                  borderWidth: 1,
+                  padding: 10,
+                  callbacks: {
+                    title: (ctx) => `${ctx[0].raw.toLocaleString()} उम्मेदवार`
+                  }
+                }
+              },
+              scales: {
+                x: {
+                  grid: { color: '#f1f5f9', drawBorder: false },
+                  ticks: { font: { size: 12 }, color: '#64748b' }
+                },
+                y: {
+                  grid: { display: false },
+                  ticks: { font: { size: 11, family: 'Noto Sans Devanagari' }, color: '#0f172a' }
                 }
               }
             }

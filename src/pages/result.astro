@@ -1,0 +1,37 @@
+---
+import '../styles/global.css';
+import Header from '../components/Header.astro';
+---
+
+<html lang="ne">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width" />
+    <title>नतिजा (Result) | निर्वाचन डाटा</title>
+  </head>
+  <body class="bg-background min-h-screen font-sans antialiased text-foreground flex flex-col">
+    
+    <!-- Navigation Header -->
+    <Header activeTab="result" />
+
+    <main class="container mx-auto px-4 py-8 flex-1 flex flex-col items-center justify-center">
+      <div class="text-center max-w-xl mx-auto py-20">
+        <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-secondary text-primary/80 mb-6">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-10 h-10"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+        
+        <h1 class="text-3xl md:text-5xl font-bold tracking-tight mb-4 nepali-text text-foreground">
+          नतिजा आउँदैछ
+        </h1>
+        <p class="text-lg text-muted-foreground mb-8">
+          Detailed election results will be published here soon. Please check back later for live updates.
+        </p>
+        
+        <a href="/" class="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 h-10 px-8 py-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full shadow-sm">
+          ड्यासबोर्डमा फर्कनुहोस् (Return to Dashboard)
+        </a>
+      </div>
+    </main>
+  </body>
+</html>
