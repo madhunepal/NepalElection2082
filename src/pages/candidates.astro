@@ -335,13 +335,16 @@ function pageUrl(p: number) {
       var _selDist = selectedDistrict;
       var _selArea = selectedConstituency;
 
-      // ── Photo loading ──
+      // ── Photo loading + card click ──
       document.querySelectorAll('.candidate-card').forEach(function(card) {
         var img = card.querySelector('.candidate-photo');
         var fb  = card.querySelector('.photo-fallback');
-        if (!img) return;
-        img.addEventListener('load', function() { img.classList.remove('opacity-0'); if (fb) fb.style.display = 'none'; });
-        img.addEventListener('error', function() { img.remove(); });
+        if (img) {
+          img.addEventListener('load', function() { img.classList.remove('opacity-0'); if (fb) fb.style.display = 'none'; });
+          img.addEventListener('error', function() { img.remove(); });
+        }
+        // Click handler directly on each card
+        card.addEventListener('click', function() { window.openCandidateModal(card); });
       });
 
       // ── Cascade helpers ──
@@ -421,16 +424,16 @@ function pageUrl(p: number) {
 
       // Show loading when Apply button or form is submitted
       document.getElementById('filterForm').addEventListener('submit', function() {
-        document.getElementById('loadingOverlay').style.display = 'flex';
+        document.getElementById('loadingBanner').style.display = 'flex';
       });
 
-      function clearSearch() {
+      window.clearSearch = function() {
         document.getElementById('searchInput').value = '';
         navigateWithFilters();
-      }
+      };
 
       // ── Modal ──
-      function openCandidateModal(card) {
+      window.openCandidateModal = function(card) {
         try {
           var encoded = card.getAttribute('data-enc');
           var bytes = Uint8Array.from(atob(encoded), function(ch) { return ch.charCodeAt(0); });
@@ -480,7 +483,7 @@ function pageUrl(p: number) {
         } catch(e) { console.error('Modal error:', e); }
       }
 
-      function closeCandidateModal() {
+      window.closeCandidateModal = function() {
         document.getElementById('candidateModal').style.display = 'none';
         document.body.style.overflow = '';
       }
