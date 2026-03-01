@@ -24,7 +24,7 @@ async function fetchAllChartData() {
   while(true) {
     const { data } = await supabase
       .from('candidates')
-      .select('party, qualification, province')
+      .select('party, qualification, province, gender, age')
       .range(page * pageSize, (page + 1) * pageSize - 1);
       
     if (!data || data.length === 0) break;
@@ -37,45 +37,105 @@ async function fetchAllChartData() {
 
 const allCandidatesForCharts = await fetchAllChartData();
 
-const partyCounts: Record<string, number> = {};
-const qualificationCounts: Record<string, number> = {};
+// ── Education level aggregation ─────
+function classifyEdu(raw: string): string {
+  const q = (raw || '').trim().toLowerCase();
+  if (!q || q === '-' || q === '0' || q === 'y') return 'Other (अन्य)';
+  if (/ph\.?d|\u092a\u093f\.?\u090f\u091a\.?\u0921\u093f|\u092a\u093f\.?\u090f\u091a\.?\u0921\u0940|\u0935\u093f\u0926\u094d\u092f\u093e\u0935\u093e\u0930\u093f\u0927\u093f|\u0935\u093f\u0926\u094d\u092f\u093e\u0935\u093e\u0930\u093f\u0928|\u0935\u093f\u0926\u094d\u092f\u093e \u0935\u093e\u0930\u093f\u0923\u0940|\u0935\u093f\u0926\u094d\u092f\u093e\u0935\u093e\u0930\u093f|\u092c\u093f\u0926\u094d\u092f\u093e\u092c\u093e\u0930\u0940\u0927\u0940|\u092c\u093f\u0926\u094d\u092f\u093e\u0935\u093e\u0930\u0940\u0927\u0940|m\.?phil|\u090f\u092e\.?\u092b\u093f\u0932/i.test(q)) return 'PhD / MPhil';
+  if (/master|\u0938\u094d\u0928\u093e\u0924\u0915\u094b\u0924\u094d\u0924\u0930|\u0938\u094d\u200d?\u0928\u093e\u0924\u0915\u094b\u0924\u094d\u0924\u0930|\u0938\u094d\u0928\u093e\u0915\u094b\u0924\u094d\u0924\u0930|\u092e\u093e\u0938\u094d\u091f\u0930|msc|m\.b\.s|m\.ed|m\.ba|m\.sc|m\.a|ma |\u090f\u092e\.?\u090f|\u090f\u092e \u092c\u093f \u090f|\u090f\u092e\.?\u0935\u093f\.?\u090f|mbs|mba|llm|m\.com|\u090f\u092e \u090f/i.test(q)) return 'Masters (स्नातकोत्तर)';
+  if (/bachelor|\u0938\u094d\u0928\u093e\u0924\u0915|\u0938\u094d\u200d?\u0928\u093e\u0924\u0915|b\.?a|b\.?sc|b\.?ed|b\.?e\b|b\.?eng|b\.?com|b\.?b|bds|bba|bbs|llb|\u0935\u093f\.\u090f\u0921|\u0935\u093f\.\u090f|\u0935\u093f\.\u090f\u0932|\u0935\u093f\.\u090f\u0938|\u092c\u093f\.?\u090f|\u092c\u093f \u090f\u0938\u0938\u0940|\u090f\u0932\u090f\u0932\u092c\u0940|\u0928\u0930\u094d\u0938\u093f\u0919/i.test(q) && !/\u0938\u094d\u0928\u093e\u0924\u0915\u094b\u0924\u094d\u0924\u0930/i.test(q)) return 'Bachelors (स्नातक)';
+  if (/\+2|\+\u0968|10\+2|12 |12\b|\u0661\u0662|i\.?a\b|i\.?sc|i\.?ed|i\.?com|hseb|\u0906\u0908\.?\u090f|\u0906\u0907 \u090f|\u092a\u094d\u0930\u092e\u093e\u0923\u092a\u0924\u094d\u0930|\u092a\u094d\u0930\u092e\u093e\u0923 \u092a\u0924\u094d\u0930|\u092a\u094d\u0930\u0935\u093f\u0923\u0924\u093e|\u092a\u094d\u0930\u0935\u093f\u0923\u0924\u093e|\u092a\u094d\u0930\u0935\u0940\u0923\u0924\u093e|\u092a\u094d\u0930\u0935\u093f\u0923\u093f\u0924\u093e|\u092a\u094d\u0932\u0938 \u091f\u0941|intermediate|diploma|\u0909\u091a\u094d\u091a \u0936\u093f\u0915\u094d\u0937\u093e|certificate|\u0661\u0968 \u092a\u093e\u0938/i.test(q)) return '+2 / Intermediate';
+  if (/slc|see|s\.l\.c|\u090f\u0938\.?\u090f\u0932\.?\u0938\u093f|\u090f\u0938\.?\u090f\u0932\.?\u0938\u0940|\u090f\u0938 \u090f\u0932 \u0938\u093f|\u090f\u0938 \u090f\u0932 \u0938\u0940|\u090f\u0938\u090f\u0932\u0938\u0940|\u0915\u0915\u094d\u0937\u093e \u0661\u0960|\u0915\u0915\u094d\u0937\u093e 10|\u092e\u093e\u0927\u094d\u092f\u092e\u093f\u0915|10 pass|\u0661\u0960 \u092a\u093e\u0938|\u0661\u0960$/i.test(q) || q === '10' || q === '\u0661\u0960') return 'SLC / SEE';
+  return 'Other (अन्य)';
+}
+
+const partyGenderCounts: Record<string, { male: number, female: number, total: number }> = {};
+const bachelorsCountByParty: Record<string, number> = {};
 const provinceCounts: Record<string, number> = {};
+const genderCounts: Record<string, number> = {};
+const ageCounts: Record<string, number> = {
+  'Below 30': 0,
+  '31-35': 0,
+  '36-45': 0,
+  '46-55': 0,
+  '56-65': 0,
+  '65 and above': 0
+};
 
 if (allCandidatesForCharts) {
   allCandidatesForCharts.forEach(c => {
+    // 1. Party
     if (c.party) {
-      partyCounts[c.party] = (partyCounts[c.party] || 0) + 1;
+      if (!partyGenderCounts[c.party]) {
+        partyGenderCounts[c.party] = { male: 0, female: 0, total: 0 };
+      }
+      partyGenderCounts[c.party].total += 1;
+      if (c.gender === 'पुरुष') partyGenderCounts[c.party].male += 1;
+      else if (c.gender === 'महिला') partyGenderCounts[c.party].female += 1;
     }
     
+    // 2. Province
     if (c.province) {
       provinceCounts[c.province] = (provinceCounts[c.province] || 0) + 1;
     }
 
-    let qual = c.qualification || 'Other';
-    if (qual.includes('Class 10') || qual.includes('S.L.C.') || qual.includes('SEE')) qual = 'SLC / SEE';
-    if (qual.includes('10+2') || qual.includes('Certificate') || qual.includes('Intermediate')) qual = '+2 / Diploma';
-    if (qual.includes('Bachelor')) qual = 'Bachelors';
-    if (qual.includes('Master')) qual = 'Masters';
-    if (qual.includes('Ph.D') || qual.includes('M.Phil')) qual = 'Ph.D / M.Phil';
-    if (qual.includes('Literate')) qual = 'Literate';
-    if (qual.includes('Under S.L.C.')) qual = 'Below SLC';
-    
-    qualificationCounts[qual] = (qualificationCounts[qual] || 0) + 1;
+    // 3. Education (Bachelors and Above)
+    const cat = classifyEdu(c.qualification);
+    if (c.party && (cat === 'Bachelors (स्नातक)' || cat === 'Masters (स्नातकोत्तर)' || cat === 'PhD / MPhil')) {
+      bachelorsCountByParty[c.party] = (bachelorsCountByParty[c.party] || 0) + 1;
+    }
+
+    // 4. Gender
+    const g = c.gender || 'अन्य';
+    genderCounts[g] = (genderCounts[g] || 0) + 1;
+
+    // 5. Age
+    if (c.age) {
+      const ageNum = parseInt(c.age, 10);
+      if (!isNaN(ageNum)) {
+        if (ageNum < 31) ageCounts['Below 30']++;
+        else if (ageNum <= 35) ageCounts['31-35']++;
+        else if (ageNum <= 45) ageCounts['36-45']++;
+        else if (ageNum <= 55) ageCounts['46-55']++;
+        else if (ageNum <= 65) ageCounts['56-65']++;
+        else ageCounts['65 and above']++;
+      }
+    }
   });
 }
 
-const partyChartData = Object.entries(partyCounts)
-  .map(([name, value]) => ({ name, value }))
-  .sort((a, b) => b.value - a.value)
+const partyChartData = Object.entries(partyGenderCounts)
+  .map(([name, counts]) => ({ name, ...counts }))
+  .sort((a, b) => b.total - a.total)
   .slice(0, 10);
 
-const qualChartData = Object.entries(qualificationCounts)
+const qualChartData = Object.entries(bachelorsCountByParty)
+  .map(([name, value]) => ({ name, value }))
+  .sort((a, b) => b.value - a.value)
+  .slice(0, 10); // Top 10 parties with highest highly educated candidates
+
+const provinceChartData = Object.entries(provinceCounts)
+  .map(([name, value]) => ({ name: `${name} (${value.toLocaleString()})`, value }))
+  .sort((a, b) => b.value - a.value);
+
+const genderChartData = Object.entries(genderCounts)
   .map(([name, value]) => ({ name, value }))
   .sort((a, b) => b.value - a.value);
 
-const provinceChartData = Object.entries(provinceCounts)
-  .map(([name, value]) => ({ name, value }))
-  .sort((a, b) => b.value - a.value);
+const ageChartData = Object.entries(ageCounts)
+  .map(([name, value]) => ({ name, value }));
+
+let maxAgeGroup = { name: '', value: 0 };
+let totalAgeCount = 0;
+ageChartData.forEach(g => {
+  totalAgeCount += g.value;
+  if (g.value > maxAgeGroup.value) {
+    maxAgeGroup = g;
+  }
+});
+
+const maxAgePercentage = totalAgeCount > 0 ? ((maxAgeGroup.value / totalAgeCount) * 100).toFixed(1) : '0.0';
+const ageSummary = `Maximum candidates (${maxAgeGroup.value.toLocaleString()}, ${maxAgePercentage}%) are in the age group ${maxAgeGroup.name}.`;
 ---
 
 <html lang="ne">
@@ -128,20 +188,34 @@ const provinceChartData = Object.entries(provinceCounts)
         </div>
 
         <!-- Qualification Chart -->
-        <div class="bg-card border border-border rounded-xl p-6 shadow-sm lg:col-span-2 lg:w-1/2 lg:mx-auto w-full">
+        <div class="bg-card border border-border rounded-xl p-6 shadow-sm">
           <div class="mb-6">
-            <h3 class="font-semibold text-foreground text-lg nepali-text">शैक्षिक योग्यता</h3>
-            <p class="text-xs text-muted-foreground">Qualification Distribution</p>
+            <h3 class="font-semibold text-foreground text-lg nepali-text">स्नातक वा सो भन्दा माथि</h3>
+            <p class="text-xs text-muted-foreground">Bachelors & Above by Party</p>
           </div>
-          <div class="h-80 w-full relative -ml-4 flex justify-center items-center">
+          <div class="h-80 w-full relative">
              <canvas id="qualificationChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Age Chart -->
+        <div class="bg-card border border-border rounded-xl p-6 shadow-sm flex flex-col">
+          <div class="mb-4">
+            <h3 class="font-semibold text-foreground text-lg nepali-text">उमेर समूह</h3>
+            <p class="text-xs text-muted-foreground">Age Distribution</p>
+          </div>
+          <div class="text-sm font-medium text-blue-700 dark:text-blue-300 mb-6 bg-blue-50 dark:bg-blue-900/30 px-4 py-3 rounded-md border border-blue-200 dark:border-blue-800">
+            {ageSummary}
+          </div>
+          <div class="h-[250px] w-full relative flex justify-center items-center">
+             <canvas id="ageChart"></canvas>
           </div>
         </div>
       </div>
     </main>
 
     <Footer />
-    <script is:inline define:vars={{ partyChartData, qualChartData, provinceChartData }}>
+    <script is:inline define:vars={{ partyChartData, qualChartData, provinceChartData, genderChartData, ageChartData }}>
       // -----------------------------
       // Chart.js Configuration
       document.addEventListener("DOMContentLoaded", function() {
@@ -183,7 +257,82 @@ const provinceChartData = Object.entries(provinceCounts)
           const data = partyChartData.map(d => d.value);
           const fullNames = partyChartData.map(d => d.name);
 
-          new Chart(ctxParty, {
+          const partyChart = new Chart(ctxParty, {
+            type: 'bar',
+            data: {
+              labels: labels,
+              datasets: [
+                {
+                  label: 'Male (पुरुष)',
+                  data: partyChartData.map(d => d.male),
+                  backgroundColor: '#3b82f6',
+                  borderWidth: 0,
+                },
+                {
+                  label: 'Female (महिला)',
+                  data: partyChartData.map(d => d.female),
+                  backgroundColor: '#ec4899',
+                  borderWidth: 0,
+                  borderRadius: { topRight: 4, bottomRight: 4 }
+                }
+              ]
+            },
+            options: {
+              indexAxis: 'y', // Horizontal
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { position: 'top', labels: { color: getTextColor(), font: { size: 11 } } },
+                tooltip: {
+                  backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                  titleColor: '#000',
+                  bodyColor: '#333',
+                  borderColor: '#e2e8f0',
+                  borderWidth: 1,
+                  padding: 10,
+                  callbacks: {
+                    title: (ctx) => `${fullNames[ctx[0].dataIndex]}`,
+                    label: (ctx) => ` ${ctx.dataset.label}: ${ctx.raw.toLocaleString()}`
+                  }
+                }
+              },
+              scales: {
+                x: {
+                  stacked: true,
+                  grid: { color: getGridColor(), drawBorder: false },
+                  ticks: { font: { size: 12 }, color: getTextColor() }
+                },
+                y: {
+                  stacked: true,
+                  grid: { display: false },
+                  ticks: { font: { size: 11, family: 'Noto Sans Devanagari' }, color: getTextColor() }
+                }
+              }
+            }
+          });
+          charts.push(partyChart);
+        }
+
+        // 2. Qualification Bar Chart (Bachelors and Above)
+        const ctxQual = document.getElementById('qualificationChart');
+        if (ctxQual && qualChartData.length > 0) {
+          
+          const getShortName = (name) => {
+            const map = {
+              "नेपाल कम्युनिष्ट पार्टी (एकीकृत मार्क्सवादी लेनिनवादी)": "नेकपा एमाले",
+              "नेपाली काँग्रेस": "काँग्रेस",
+              "नेपाल कम्युनिष्ट पार्टी (माओवादी केन्द्र)": "माओवादी केन्द्र",
+              "राष्ट्रिय स्वतन्त्र पार्टी": "रास्वपा",
+              "राष्ट्रिय प्रजातन्त्र पार्टी": "राप्रपा",
+              "जनता समाजवादी पार्टी, नेपाल": "जसपा"
+            };
+            return map[name] || (name.length > 20 ? name.substring(0, 20) + '...' : name);
+          };
+
+          const labels = qualChartData.map(d => getShortName(d.name));
+          const data = qualChartData.map(d => d.value);
+          const fullNames = qualChartData.map(d => d.name);
+
+          const qualChart = new Chart(ctxQual, {
             type: 'bar',
             data: {
               labels: labels,
@@ -215,25 +364,26 @@ const provinceChartData = Object.entries(provinceCounts)
               },
               scales: {
                 x: {
-                  grid: { color: '#f1f5f9', drawBorder: false },
-                  ticks: { font: { size: 12 }, color: '#64748b' }
+                  grid: { color: getGridColor(), drawBorder: false },
+                  ticks: { font: { size: 12 }, color: getTextColor() }
                 },
                 y: {
                   grid: { display: false },
-                  ticks: { font: { size: 11, family: 'Noto Sans Devanagari' }, color: '#0f172a' }
+                  ticks: { font: { size: 11, family: 'Noto Sans Devanagari' }, color: getTextColor() }
                 }
               }
             }
           });
+          charts.push(qualChart);
         }
 
-        // 2. Qualification Pie Chart (Doughnut style)
-        const ctxQual = document.getElementById('qualificationChart');
-        if (ctxQual && qualChartData.length > 0) {
-          const labels = qualChartData.map(d => d.name);
-          const data = qualChartData.map(d => d.value);
+        // 3. Age Pie Chart (Doughnut style)
+        const ctxAge = document.getElementById('ageChart');
+        if (ctxAge && ageChartData.length > 0) {
+          const labels = ageChartData.map(d => d.name);
+          const data = ageChartData.map(d => d.value);
 
-          new Chart(ctxQual, {
+          const ageChart = new Chart(ctxAge, {
             type: 'doughnut',
             data: {
               labels: labels,
@@ -241,12 +391,12 @@ const provinceChartData = Object.entries(provinceCounts)
                 data: data,
                 backgroundColor: CHART_COLORS,
                 borderWidth: 2,
-                borderColor: '#ffffff'
+                borderColor: getBorderColor()
               }]
             },
             options: {
               maintainAspectRatio: false,
-              cutout: '60%', // Matches innerRadius: 50
+              cutout: '60%',
               plugins: {
                 legend: {
                   position: 'right',
@@ -277,15 +427,15 @@ const provinceChartData = Object.entries(provinceCounts)
               }
             }
           });
-          charts.push(qualChart);
+          charts.push(ageChart);
         }
-        // 3. Province Bar Chart (Horizontal)
+        // 4. Province Bar Chart (Horizontal)
         const ctxProvince = document.getElementById('provinceChart');
         if (ctxProvince && provinceChartData.length > 0) {
           const labels = provinceChartData.map(d => d.name);
           const data = provinceChartData.map(d => d.value);
 
-          new Chart(ctxProvince, {
+          const provinceChart = new Chart(ctxProvince, {
             type: 'bar',
             data: {
               labels: labels,
@@ -316,17 +466,47 @@ const provinceChartData = Object.entries(provinceCounts)
               },
               scales: {
                 x: {
-                  grid: { color: '#f1f5f9', drawBorder: false },
-                  ticks: { font: { size: 12 }, color: '#64748b' }
+                  grid: { color: getGridColor(), drawBorder: false },
+                  ticks: { font: { size: 12 }, color: getTextColor() }
                 },
                 y: {
                   grid: { display: false },
-                  ticks: { font: { size: 11, family: 'Noto Sans Devanagari' }, color: '#0f172a' }
+                  ticks: { font: { size: 11, family: 'Noto Sans Devanagari' }, color: getTextColor() }
                 }
               }
             }
           });
+          charts.push(provinceChart);
         }
+
+        // Apply dark mode overrides dynamically
+        function updateChartThemes() {
+          var tColor = getTextColor();
+          var gColor = getGridColor();
+          var bColor = getBorderColor();
+          charts.forEach(function(c) {
+            if (c.config.type === 'doughnut') {
+              c.options.plugins.legend.labels.color = tColor;
+              c.data.datasets[0].borderColor = bColor;
+            } else if (c.config.type === 'bar') {
+              if (c.options.plugins.legend && c.options.plugins.legend.labels) {
+                c.options.plugins.legend.labels.color = tColor;
+              }
+              c.options.scales.x.ticks.color = tColor;
+              c.options.scales.x.grid.color = gColor;
+              c.options.scales.y.ticks.color = tColor;
+            }
+            c.update();
+          });
+        }
+
+        // Listen for class changes on HTML tag
+        var observer = new MutationObserver(function(mutations) {
+          mutations.forEach(function(m) {
+            if (m.attributeName === 'class') updateChartThemes();
+          });
+        });
+        observer.observe(document.documentElement, { attributes: true });
       });
     </script>
   </body>
