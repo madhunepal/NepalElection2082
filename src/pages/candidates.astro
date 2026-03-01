@@ -36,7 +36,7 @@ const pageSize = 20;
 // Query with pagination + filter
 let query = supabase
   .from('candidates')
-  .select('candidate_id, name, age, gender, party, province, district', { count: 'exact' })
+  .select('candidate_id, name, age, gender, party, province, district, qualification', { count: 'exact' })
   .range((currentPage - 1) * pageSize, currentPage * pageSize - 1)
   .order('name');
 
@@ -251,7 +251,7 @@ const hasNext = currentPage < totalPages;
             <option value="अन्य" selected={selectedGender === 'अन्य'}>अन्य (Other)</option>
           </select>
 
-          <button onclick="updateFilters()" class="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium rounded-md shadow transition-colors w-full md:w-auto mt-2 md:mt-0 whitespace-nowrap">
+          <button id="applyFiltersBtn" class="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium rounded-md shadow transition-colors w-full md:w-auto mt-2 md:mt-0 whitespace-nowrap">
             खोज्नुहोस् / Apply
           </button>
         </div>
@@ -315,9 +315,13 @@ const hasNext = currentPage < totalPages;
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 shrink-0"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
                         <span class="truncate">{c.district ? `${c.district} - क्षेत्र १` : c.province}</span>
                       </div>
-                      <div class="flex items-center gap-1.5 text-muted-foreground col-span-2">
+                      <div class="flex items-center gap-1.5 text-muted-foreground">
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 shrink-0"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
                         <span>{c.age} वर्ष</span>
+                      </div>
+                      <div class="flex items-center gap-1.5 text-muted-foreground">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 shrink-0"><path d="m4 6 8-4 8 4"/><path d="m18 10 4 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8l4-2"/><path d="M14 22v-4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v4"/><path d="M18 5v17"/><path d="M6 5v17"/><circle cx="12" cy="9" r="2"/></svg>
+                        <span class="truncate">{c.qualification || 'N/A'}</span>
                       </div>
                     </div>
                   </div>
@@ -356,36 +360,59 @@ const hasNext = currentPage < totalPages;
       )}
 
       <script is:inline>
-      window.updateFilters = function() {
-        const province = document.getElementById('provinceSelect').value;
-        const district = document.getElementById('districtSelect').value;
-        const party = document.getElementById('partySelect').value;
-        const gender = document.getElementById('genderSelect').value;
-        const search = document.getElementById('searchInput').value;
-        
-        const url = new URL(window.location.href);
-        const searchParams = url.searchParams;
+      document.addEventListener('DOMContentLoaded', () => {
+        window.updateFilters = function() {
+          const province = document.getElementById('provinceSelect').value;
+          const district = document.getElementById('districtSelect').value;
+          const party = document.getElementById('partySelect').value;
+          const gender = document.getElementById('genderSelect').value;
+          const search = document.getElementById('searchInput').value;
+          
+          const url = new URL(window.location.href);
+          const searchParams = url.searchParams;
 
-        // Reset page to 1 when filters change
-        searchParams.delete('page');
+          // Reset page to 1 when filters change
+          searchParams.delete('page');
 
-        if (province !== 'all') searchParams.set('province', province);
-        else searchParams.delete('province');
+          if (province !== 'all') searchParams.set('province', province);
+          else searchParams.delete('province');
 
-        if (district !== 'all') searchParams.set('district', district);
-        else searchParams.delete('district');
+          if (district !== 'all') searchParams.set('district', district);
+          else searchParams.delete('district');
 
-        if (party !== 'all') searchParams.set('party', party);
-        else searchParams.delete('party');
-        
-        if (gender !== 'all') searchParams.set('gender', gender);
-        else searchParams.delete('gender');
-        
-        if (search) searchParams.set('search', search);
-        else searchParams.delete('search');
+          if (party !== 'all') searchParams.set('party', party);
+          else searchParams.delete('party');
+          
+          if (gender !== 'all') searchParams.set('gender', gender);
+          else searchParams.delete('gender');
+          
+          if (search) searchParams.set('search', search);
+          else searchParams.delete('search');
 
-        window.location.href = url.toString();
-      }
-    </script>
+          // Force page reload with new params
+          window.location.assign(url.toString());
+        };
+
+        // Attach event listeners manually instead of relying solely on inline onclick attributes
+        // which can sometimes be sanitized or detached by framework routers
+        const applyBtn = document.getElementById('applyFiltersBtn');
+        if (applyBtn) {
+          applyBtn.addEventListener('click', window.updateFilters);
+        }
+
+        const selects = ['provinceSelect', 'districtSelect', 'partySelect', 'genderSelect'];
+        selects.forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.addEventListener('change', window.updateFilters);
+        });
+
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) {
+          searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') window.updateFilters();
+          });
+        }
+      });
+      </script>
   </body>
 </html>
