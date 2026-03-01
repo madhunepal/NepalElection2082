@@ -359,14 +359,21 @@ const hasNext = currentPage < totalPages;
         </div>
       )}
 
-      <script is:inline>
-      document.addEventListener('DOMContentLoaded', () => {
-        window.updateFilters = function() {
-          const province = document.getElementById('provinceSelect').value;
-          const district = document.getElementById('districtSelect').value;
-          const party = document.getElementById('partySelect').value;
-          const gender = document.getElementById('genderSelect').value;
-          const search = document.getElementById('searchInput').value;
+      <script>
+        function updateFilters() {
+          const provinceInput = document.getElementById('provinceSelect') as HTMLSelectElement;
+          const districtInput = document.getElementById('districtSelect') as HTMLSelectElement;
+          const partyInput = document.getElementById('partySelect') as HTMLSelectElement;
+          const genderInput = document.getElementById('genderSelect') as HTMLSelectElement;
+          const searchInput = document.getElementById('searchInput') as HTMLInputElement;
+          
+          if (!provinceInput || !districtInput || !partyInput || !genderInput || !searchInput) return;
+
+          const province = provinceInput.value;
+          const district = districtInput.value;
+          const party = partyInput.value;
+          const gender = genderInput.value;
+          const search = searchInput.value;
           
           const url = new URL(window.location.href);
           const searchParams = url.searchParams;
@@ -391,28 +398,31 @@ const hasNext = currentPage < totalPages;
 
           // Force page reload with new params
           window.location.assign(url.toString());
-        };
-
-        // Attach event listeners manually instead of relying solely on inline onclick attributes
-        // which can sometimes be sanitized or detached by framework routers
-        const applyBtn = document.getElementById('applyFiltersBtn');
-        if (applyBtn) {
-          applyBtn.addEventListener('click', window.updateFilters);
         }
 
-        const selects = ['provinceSelect', 'districtSelect', 'partySelect', 'genderSelect'];
-        selects.forEach(id => {
-          const el = document.getElementById(id);
-          if (el) el.addEventListener('change', window.updateFilters);
-        });
+        // Initialize event listeners
+        function initFilters() {
+          const applyBtn = document.getElementById('applyFiltersBtn');
+          if (applyBtn) {
+            applyBtn.addEventListener('click', updateFilters);
+          }
 
-        const searchInput = document.getElementById('searchInput');
-        if (searchInput) {
-          searchInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') window.updateFilters();
+          const selects = ['provinceSelect', 'districtSelect', 'partySelect', 'genderSelect'];
+          selects.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('change', updateFilters);
           });
+
+          const searchInput = document.getElementById('searchInput');
+          if (searchInput) {
+            searchInput.addEventListener('keypress', (e) => {
+              if (e.key === 'Enter') updateFilters();
+            });
+          }
         }
-      });
+
+        // Run when DOM is ready (works for initial load)
+        document.addEventListener('DOMContentLoaded', initFilters);
       </script>
   </body>
 </html>
