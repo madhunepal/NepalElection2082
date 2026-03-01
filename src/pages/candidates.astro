@@ -26,7 +26,8 @@ let query = supabase
   .range((currentPage - 1) * pageSize, currentPage * pageSize - 1)
   .order('district').order('constituency').order('name');
 
-if (searchQuery)                      query = query.ilike('name', `%${searchQuery}%`);
+const trimmedSearch = searchQuery.trim();
+if (trimmedSearch)                    query = query.ilike('name', `%${trimmedSearch}%`);
 if (selectedGender      !== 'all')    query = query.eq('gender',       selectedGender);
 if (selectedProvince    !== 'all')    query = query.eq('province',     selectedProvince);
 if (selectedDistrict    !== 'all')    query = query.eq('district',     selectedDistrict);
@@ -221,6 +222,12 @@ function pageUrl(p: number) {
         </div>
       </form>
 
+      <!-- Inline loading banner (shown between filters and results) -->
+      <div id="loadingBanner" style="display:none" class="flex items-center justify-center gap-3 py-6 mb-4 bg-blue-50 border border-blue-200 rounded-xl">
+        <div class="h-6 w-6 animate-spin rounded-full border-3 border-blue-600 border-t-transparent"></div>
+        <span class="text-lg font-semibold text-blue-700">Loading candidates…</span>
+      </div>
+
       {error && (
         <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded mb-6 text-red-700 text-sm">Error: {error.message}</div>
       )}
@@ -263,17 +270,18 @@ function pageUrl(p: number) {
                       </div>
                       <div class="flex-1 min-w-0">
                         <h3 class="font-semibold text-foreground text-sm leading-snug line-clamp-2">{c.name}</h3>
-                        <span class={`inline-block mt-1 text-xs px-2 py-0.5 rounded-full border font-medium ${color}`}>
-                          {shortParty(c.party)}
-                        </span>
+                        <div class="flex flex-wrap items-center gap-1 mt-1">
+                          <span class={`inline-block text-xs px-2 py-0.5 rounded-full border font-medium ${color}`}>
+                            {shortParty(c.party)}
+                          </span>
+                          {c.symbol_name && (
+                            <span class="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                              ⚑ {c.symbol_name}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-
-                    {c.symbol_name && (
-                      <div class="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
-                        <span>⚑</span><span class="truncate">{c.symbol_name}</span>
-                      </div>
-                    )}
 
                     <div class="mt-2.5 space-y-1.5 text-xs text-muted-foreground flex-1">
                       <div class="flex items-center gap-1.5 font-medium text-blue-600">
@@ -320,14 +328,6 @@ function pageUrl(p: number) {
     </div>
 
     <!-- Embed location map for client-side cascade -->
-    <!-- ── LOADING OVERLAY ── -->
-    <div id="loadingOverlay" style="display:none" class="fixed inset-0 z-[100] flex items-center justify-center bg-white/80 backdrop-blur-sm">
-      <div class="text-center">
-        <div class="inline-block h-10 w-10 animate-spin rounded-full border-4 border-blue-600 border-t-transparent mb-4"></div>
-        <h3 class="text-2xl font-bold text-foreground">Loading…</h3>
-        <p class="text-muted-foreground mt-1">Filtering candidates</p>
-      </div>
-    </div>
 
     <script is:inline define:vars={{ locationMapJSON: JSON.stringify(locationMap), selectedProvince, selectedDistrict, selectedConstituency }}>
       var LOC = JSON.parse(locationMapJSON);
@@ -384,7 +384,7 @@ function pageUrl(p: number) {
       // ── Auto-navigate on filter change ──
       function navigateWithFilters() {
         // Show large centered loading overlay
-        document.getElementById('loadingOverlay').style.display = 'flex';
+        document.getElementById('loadingBanner').style.display = 'flex';
         document.getElementById('filterForm').submit();
       }
 
