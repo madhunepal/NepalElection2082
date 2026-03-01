@@ -6,333 +6,362 @@ import Header from '../components/Header.astro';
 
 const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || process.env.PUBLIC_SUPABASE_URL;
 const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || process.env.PUBLIC_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error('Missing PUBLIC_SUPABASE_URL or PUBLIC_SUPABASE_ANON_KEY in Vercel environment');
-}
-
+if (!supabaseUrl || !supabaseKey) throw new Error('Missing Supabase credentials');
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const partyColorMap: Record<string, string> = {
-  "नेपाली काँग्रेस": "bg-green-100 text-green-800 border-green-200",
-  "नेपाल कम्युनिष्ट पार्टी (एकीकृत मार्क्सवादी लेनिनवादी)": "bg-red-100 text-red-800 border-red-200",
-  "नेकपा एमाले": "bg-red-100 text-red-800 border-red-200", // Handle abbreviation
-  "नेपाल कम्युनिष्ट पार्टी (माओवादी केन्द्र)": "bg-rose-100 text-rose-800 border-rose-200",
-  "राष्ट्रिय स्वतन्त्र पार्टी": "bg-blue-100 text-blue-800 border-blue-200",
-  "राष्ट्रिय प्रजातन्त्र पार्टी": "bg-purple-100 text-purple-800 border-purple-200",
-  "जनता समाजवादी पार्टी, नेपाल": "bg-green-100 text-green-800 border-green-200",
-  "स्वतन्त्र": "bg-gray-100 text-gray-800 border-gray-200",
-};
-
-// We don't need candidate list filters on the dashboard page anymore, just the raw stats
-const { count: totalCount } = await supabase
-  .from('candidates')
-  .select('candidate_id', { count: 'exact', head: true });
-
-
-// Unique provinces
-const { data: provincesData } = await supabase
-  .from('candidates')
-  .select('province')
-  .not('province', 'is', null)
-  .limit(10000);
-
-const uniqueProvinces = [...new Set(provincesData?.map(p => p.province) || [])].sort();
-
-// Unique districts
-const { data: districtsData } = await supabase
-  .from('candidates')
-  .select('district')
-  .not('district', 'is', null)
-  .limit(10000);
-
-const uniqueDistricts = [...new Set(districtsData?.map(d => d.district) || [])].sort();
-
-// Unique parties
-const { data: partiesData } = await supabase
-  .from('candidates')
-  .select('party')
-  .not('party', 'is', null)
-  .limit(10000);
-
-const uniqueParties = [...new Set(partiesData?.map(p => p.party) || [])].sort();
-
-// We need overall totals for the Statistics Cards. Let's fetch the counts using a very light query.
-let totalCandidatesCount = totalCount || 0;
-let totalUniquePartiesCount = 66; // Hardcoded per user request
-let totalUniqueProvincesCount = 7; // Hardcoded per user request
-// Hardcoded 77 Districts for Nepal as it is a constant, or we could fetch it if there was a district column
-let totalDistrictsCount = 77;
-
-// Prepare Data for Charts (Party Distribution & Qualification)
-// We will aggregate this from the database for the *entire* dataset regardless of filters, 
-// matching how the original dashboard analysis section behaves.
-const { data: allCandidatesForCharts } = await supabase
-  .from('candidates')
-  .select('party, qualification')
-  .limit(10000); // Fetch all to aggregate
-
-const partyCounts: Record<string, number> = {};
-const qualificationCounts: Record<string, number> = {};
-
-if (allCandidatesForCharts) {
-  allCandidatesForCharts.forEach(c => {
-    if (c.party) {
-      partyCounts[c.party] = (partyCounts[c.party] || 0) + 1;
-    }
-    // Handle specific mappings for Qualifications based on original data (sometimes numeric or unstructured)
-    // Using simple mapping based on source code grouping
-    let qual = c.qualification || 'Other';
-    // Clean up obvious synonyms based on screenshots
-    if (qual.includes('Class 10') || qual.includes('S.L.C.') || qual.includes('SEE')) qual = 'SLC / SEE';
-    if (qual.includes('10+2') || qual.includes('Certificate') || qual.includes('Intermediate')) qual = '+2 / Diploma';
-    if (qual.includes('Bachelor')) qual = 'Bachelors';
-    if (qual.includes('Master')) qual = 'Masters';
-    if (qual.includes('Ph.D') || qual.includes('M.Phil')) qual = 'Ph.D / M.Phil';
-    if (qual.includes('Literate')) qual = 'Literate';
-    if (qual.includes('Under S.L.C.')) qual = 'Below SLC';
-    
-    qualificationCounts[qual] = (qualificationCounts[qual] || 0) + 1;
-  });
+// ── Fetch all data in parallel ──────────────────────────────
+async function fetchAll() {
+  let all: any[] = []; let p = 0;
+  while (true) {
+    const { data } = await supabase.from('candidates')
+      .select('candidate_id,name,party,gender,qualification,district,constituency,province')
+      .range(p*1000,(p+1)*1000-1);
+    if (!data || !data.length) break;
+    all = all.concat(data);
+    if (data.length < 1000) break; p++;
+  }
+  return all;
 }
 
-// Convert objects to arrays for Chart.js sorting
-const partyChartData = Object.entries(partyCounts)
-  .map(([name, value]) => ({ name, value }))
-  .sort((a, b) => b.value - a.value)
-  .slice(0, 10); // Show top 10
+const allCandidates = await fetchAll();
+const totalCandidates = allCandidates.length;
 
-const qualChartData = Object.entries(qualificationCounts)
+// Count unique parties
+const uniqueParties = [...new Set(allCandidates.map(c => c.party).filter(Boolean))];
+const totalParties = uniqueParties.length;
+
+// ── Education level aggregation ─────────────────────────────
+const eduMap: Record<string, number> = {};
+allCandidates.forEach(c => {
+  let q = (c.qualification || '').trim();
+  // Normalize
+  if (!q || q === '-' || q === '0') q = 'अन्य (Other)';
+  else if (/master|एम\.|m\.a|m\.sc|m\.ed|m\.b|m\.phil/i.test(q)) q = 'Masters';
+  else if (/bachelor|b\.a|b\.sc|b\.ed|b\.e|b\.eng|b\.com|b\.b|स्नातक/i.test(q)) q = 'Bachelors (स्नातक)';
+  else if (/ph\.d|पि\.एच/i.test(q)) q = 'Ph.D';
+  else if (/10\+2|\+2|twelve|intermediate|12 pass|i\.a|i\.sc|i\.ed|i\.com|cert|diploma|प्रमाणपत्र|उच्च माध्य|hseb/i.test(q)) q = '+2 / Intermediate';
+  else if (/s\.l\.c|slc|see|10 pass|एस\.एल\.सी|माध्यमिक/i.test(q)) q = 'SLC / SEE';
+  else if (/literate|साक्षर|primary|प्राथमिक/i.test(q)) q = 'Literate (साक्षर)';
+  else if (q.length < 30) q = q; // keep short labels as-is
+  else q = 'अन्य (Other)';
+
+  eduMap[q] = (eduMap[q] || 0) + 1;
+});
+const eduData = Object.entries(eduMap)
   .map(([name, value]) => ({ name, value }))
   .sort((a, b) => b.value - a.value);
 
+// ── Gender aggregation ──────────────────────────────────────
+const genderMap: Record<string, number> = {};
+allCandidates.forEach(c => {
+  const g = c.gender || 'अन्य';
+  genderMap[g] = (genderMap[g] || 0) + 1;
+});
+const genderData = Object.entries(genderMap)
+  .map(([name, value]) => ({ name, value }))
+  .sort((a, b) => b.value - a.value);
 
+// ── Party aggregation (top 7 + others) ──────────────────────
+const partyMap: Record<string, number> = {};
+allCandidates.forEach(c => {
+  if (c.party) partyMap[c.party] = (partyMap[c.party] || 0) + 1;
+});
+const sortedParties = Object.entries(partyMap)
+  .map(([name, value]) => ({ name, value }))
+  .sort((a, b) => b.value - a.value);
+const top7 = sortedParties.slice(0, 7);
+const othersCount = sortedParties.slice(7).reduce((s, p) => s + p.value, 0);
+const partyChartData = [...top7, { name: 'अन्य (Others)', value: othersCount }];
+
+// ── Short party name helper ─────────────────────────────────
+function shortParty(p: string) {
+  if (p.includes('एकीकृत मार्क्सवादी')) return 'नेकपा एमाले';
+  if (p.includes('माओवादी')) return 'माओवादी केन्द्र';
+  if (p.includes('काँग्रेस')) return 'नेपाली काँग्रेस';
+  if (p.includes('स्वतन्त्र पार्टी')) return 'रा.स्व.पा.';
+  if (p.includes('प्रजातन्त्र पार्टी')) return 'राप्रपा';
+  if (p.includes('जनता समाजवादी')) return 'जसपा';
+  if (p.includes('लोकतान्त्रिक समाजवादी')) return 'लो.स.पा.';
+  if (p.includes('जनमोर्चा')) return 'जनमोर्चा';
+  if (p === 'स्वतन्त्र') return 'स्वतन्त्र';
+  return p.length > 18 ? p.slice(0, 16) + '…' : p;
+}
+
+// ── Featured Constituencies ─────────────────────────────────
+// Hard-coded matchups as requested by user
+const featuredMatchups = [
+  {
+    label: 'झापा - क्षेत्र 5',
+    tag: '🔥 Hot Seat',
+    candidates: [
+      { id: 339653, name: 'वालेन्द्र शाह (बालेन)', short: 'बालेन' },
+      { id: 340111, name: 'के.पी शर्मा ओली', short: 'के.पी ओली' },
+    ]
+  },
+  {
+    label: 'सर्लाही - क्षेत्र 4',
+    tag: '🔥 Key Battle',
+    candidates: [
+      { id: 341549, name: 'गगन कुमार थापा', short: 'गगन थापा' },
+      { id: 340974, name: 'अमरेश कुमार सिह', short: 'अमरेश कुमार' },
+    ]
+  },
+  {
+    label: 'काठमाडौं - क्षेत्र 5',
+    tag: '⭐ Capital Fight',
+    candidates: [
+      { id: 340646, name: 'प्रदीप पौडेल', short: 'प्रदीप पौडेल' },
+      { id: 340085, name: 'इश्वर पोखरेल', short: 'ईश्वर पोखरेल' },
+    ]
+  },
+  {
+    label: 'काठमाडौं - क्षेत्र 1',
+    tag: '⭐ Capital Clash',
+    candidates: [
+      { id: 0, name: 'रवीन्द्र मिश्र', short: 'रवीन्द्र मिश्र' },
+      { id: 0, name: 'प्रबल थापा', short: 'प्रबल थापा' },
+    ]
+  },
+  {
+    label: 'सुनसरी - क्षेत्र 1',
+    tag: '🗳️ Close Race',
+    candidates: [
+      { id: 0, name: 'हर्क साम्पाङ', short: 'हर्क साम्पाङ' },
+      { id: 0, name: 'गोमा तामाङ', short: 'गोमा तामाङ' },
+    ]
+  },
+  {
+    label: 'रुकुम पूर्व - क्षेत्र 1',
+    tag: '🔥 PM Race',
+    candidates: [
+      { id: 0, name: 'पुष्पकमल दाहाल (प्रचण्ड)', short: 'प्रचण्ड' },
+      { id: 0, name: 'लीलामणि गौतम', short: 'लीलामणि गौतम' },
+    ]
+  },
+];
+
+// Find actual candidate_ids from DB for matchups with id=0
+featuredMatchups.forEach(m => {
+  m.candidates.forEach(c => {
+    if (!c.id) {
+      const found = allCandidates.find(ac => ac.name && ac.name.includes(c.short.split(' ')[0]));
+      if (found) c.id = found.candidate_id;
+    }
+  });
+});
 ---
 
 <html lang="ne">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>नेपाल निर्वाचन उम्मेदवार ड्यासबोर्ड | Nepal Election Dashboard</title>
-    <!-- Chart.js Injection -->
+    <title>निर्वाचन ड्यासबोर्ड | Nepal Election 2082</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   </head>
 
   <body class="bg-background min-h-screen font-sans antialiased text-foreground">
-    
-    <!-- Navigation Header -->
     <Header activeTab="dashboard" />
 
     <main class="container mx-auto px-4 py-8">
-      
+
+      <!-- Title -->
       <div class="mb-8">
-        <h1 class="text-3xl md:text-4xl font-bold tracking-tight mb-2 nepali-text text-foreground">
-          नेपाल निर्वाचन उम्मेदवार
+        <h1 class="text-3xl md:text-4xl font-bold tracking-tight mb-1">
+          निर्वाचन ड्यासबोर्ड
+          <span class="text-lg font-normal text-muted-foreground ml-1">(Election Dashboard)</span>
         </h1>
-        <p class="text-muted-foreground">
-          Nepal Election Candidates Dashboard<br/>
-          <span class="text-sm">जिल्ला, प्रदेश, र पार्टी अनुसार उम्मेदवारहरू खोज्नुहोस् • Explore candidates by district, province, and party</span>
-        </p>
+        <p class="text-muted-foreground text-sm">नेपाल प्रतिनिधि सभा निर्वाचन २०८२ • Nepal House of Representatives Election 2082</p>
       </div>
 
-      <!-- Global Statistics Cards (4 Columns) -->
+      <!-- ══════════ ROW 1: Stats Cards ══════════ -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <div class="stat-card flex justify-between items-start">
+
+        <!-- Voters -->
+        <div class="bg-card border border-border rounded-xl p-5 shadow-sm flex justify-between items-start">
           <div>
-            <p class="text-sm text-foreground/80 font-semibold nepali-text">कुल उम्मेदवार</p>
-            <p class="text-xs text-muted-foreground mb-2">Total Candidates</p>
-            <p class="text-4xl font-bold text-foreground">{totalCandidatesCount.toLocaleString()}</p>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Voters</span>
+            </div>
+            <p class="text-3xl font-bold text-foreground">18.9M</p>
+            <p class="text-xs text-muted-foreground mt-1">कुल मतदाता</p>
           </div>
-          <div class="bg-secondary p-3 rounded-xl text-muted-foreground">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <div class="bg-blue-50 border border-blue-200 p-3 rounded-xl text-blue-600">
+            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           </div>
         </div>
 
-        <div class="stat-card flex justify-between items-start">
+        <!-- Candidates -->
+        <div class="bg-card border border-border rounded-xl p-5 shadow-sm flex justify-between items-start">
           <div>
-            <p class="text-sm text-foreground/80 font-semibold nepali-text">राजनीतिक दलहरू</p>
-            <p class="text-xs text-muted-foreground mb-2">Political Parties</p>
-            <p class="text-4xl font-bold text-foreground">{totalUniquePartiesCount}</p>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Candidates</span>
+            </div>
+            <p class="text-3xl font-bold text-foreground">{totalCandidates.toLocaleString()}</p>
+            <p class="text-xs text-muted-foreground mt-1">कुल उम्मेदवार</p>
           </div>
-          <div class="bg-secondary p-3 rounded-xl text-muted-foreground">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
+          <div class="bg-green-50 border border-green-200 p-3 rounded-xl text-green-600">
+            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
           </div>
         </div>
 
-        <div class="stat-card flex justify-between items-start">
+        <!-- Seats -->
+        <div class="bg-card border border-border rounded-xl p-5 shadow-sm flex justify-between items-start">
           <div>
-             <p class="text-sm text-foreground/80 font-semibold nepali-text">जिल्लाहरू</p>
-             <p class="text-xs text-muted-foreground mb-2">Districts</p>
-             <p class="text-4xl font-bold text-foreground">{totalDistrictsCount}</p>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Seats</span>
+            </div>
+            <p class="text-3xl font-bold text-foreground">275</p>
+            <p class="text-xs text-muted-foreground mt-1">प्रतिनिधि सभा सीट</p>
           </div>
-          <div class="bg-secondary p-3 rounded-xl text-muted-foreground">
-             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+          <div class="bg-purple-50 border border-purple-200 p-3 rounded-xl text-purple-600">
+            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
           </div>
         </div>
 
-        <div class="stat-card flex justify-between items-start">
+        <!-- Parties -->
+        <div class="bg-card border border-border rounded-xl p-5 shadow-sm flex justify-between items-start">
           <div>
-             <p class="text-sm text-foreground/80 font-semibold nepali-text">प्रदेशहरू</p>
-             <p class="text-xs text-muted-foreground mb-2">Provinces</p>
-             <p class="text-4xl font-bold text-foreground">{totalUniqueProvincesCount}</p>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Parties</span>
+            </div>
+            <p class="text-3xl font-bold text-foreground">{totalParties}</p>
+            <p class="text-xs text-muted-foreground mt-1">राजनीतिक दलहरू</p>
           </div>
-          <div class="bg-secondary p-3 rounded-xl text-muted-foreground">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          <div class="bg-amber-50 border border-amber-200 p-3 rounded-xl text-amber-600">
+            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
           </div>
         </div>
       </div>
 
+      <!-- ══════════ ROW 2: Charts ══════════ -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
 
-
-      <!-- Analysis Charts Section -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
-        <!-- Party Chart -->
-        <div class="bg-card border border-border rounded-xl p-6 shadow-sm">
-          <div class="mb-6">
-            <h3 class="font-semibold text-foreground text-lg nepali-text">पार्टी अनुसार उम्मेदवार</h3>
-            <p class="text-xs text-muted-foreground">Candidates by Party</p>
+        <!-- Education Pie Chart -->
+        <div class="bg-card border border-border rounded-xl p-5 shadow-sm">
+          <h3 class="font-semibold text-foreground text-base mb-1">📚 Education Level</h3>
+          <p class="text-xs text-muted-foreground mb-4">शैक्षिक योग्यता अनुसार</p>
+          <div class="h-64 relative">
+            <canvas id="eduChart"></canvas>
           </div>
-          <div class="h-80 w-full relative">
+        </div>
+
+        <!-- Gender Pie Chart -->
+        <div class="bg-card border border-border rounded-xl p-5 shadow-sm">
+          <h3 class="font-semibold text-foreground text-base mb-1">👤 Gender Distribution</h3>
+          <p class="text-xs text-muted-foreground mb-4">लिङ्ग अनुसार</p>
+          <div class="h-64 relative">
+            <canvas id="genderChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Parties Bar Chart -->
+        <div class="bg-card border border-border rounded-xl p-5 shadow-sm">
+          <h3 class="font-semibold text-foreground text-base mb-1">🏛️ Top Parties</h3>
+          <p class="text-xs text-muted-foreground mb-4">पार्टी अनुसार उम्मेदवार</p>
+          <div class="h-64 relative">
             <canvas id="partyChart"></canvas>
           </div>
         </div>
+      </div>
 
-        <!-- Qualification Chart -->
-        <div class="bg-card border border-border rounded-xl p-6 shadow-sm">
-          <div class="mb-6">
-            <h3 class="font-semibold text-foreground text-lg nepali-text">शैक्षिक योग्यता</h3>
-            <p class="text-xs text-muted-foreground">Qualification Distribution</p>
-          </div>
-          <div class="h-80 w-full relative -ml-4 flex justify-center items-center">
-             <canvas id="qualificationChart"></canvas>
-          </div>
+      <!-- ══════════ ROW 3: Featured Constituencies ══════════ -->
+      <div class="mb-8">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-bold text-foreground">🗳️ Featured Constituencies</h2>
+          <a href="/candidates" class="text-blue-600 text-sm font-medium hover:underline">View all candidates →</a>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {featuredMatchups.map(matchup => (
+            <div class="bg-card border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+              <!-- Location + tag -->
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                  <span class="text-blue-600">📍</span>
+                  <span class="font-semibold text-sm text-foreground">{matchup.label}</span>
+                </div>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200 font-medium">
+                  {matchup.tag}
+                </span>
+              </div>
+
+              <!-- VS card -->
+              <div class="flex items-center justify-between gap-2">
+                {matchup.candidates.map((c, i) => {
+                  const photoUrl = c.id
+                    ? `https://election.gov.np/2082/uploads/images/candidates/${c.id}.jpg`
+                    : null;
+                  return (
+                    <div class="flex-1 text-center">
+                      <!-- Photo -->
+                      <div class="relative h-16 w-16 mx-auto rounded-full bg-slate-100 overflow-hidden border-2 border-slate-200 mb-2">
+                        <div class="absolute inset-0 flex items-center justify-center text-slate-400 font-bold text-lg">
+                          {c.name.charAt(0)}
+                        </div>
+                        {photoUrl && (
+                          <img
+                            src={photoUrl}
+                            alt={c.name}
+                            class="featured-photo absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-300"
+                            loading="lazy"
+                          />
+                        )}
+                      </div>
+                      <p class="text-xs font-semibold text-foreground leading-tight">{c.short}</p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <!-- VS divider was implicit -->
+              <div class="text-center my-1">
+                <span class="text-xs font-bold text-muted-foreground bg-secondary px-3 py-0.5 rounded-full">VS</span>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
+
+      <!-- ══════════ CTA: See All Candidates ══════════ -->
+      <div class="text-center py-8 bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-2xl mb-8">
+        <h3 class="text-xl font-bold text-foreground mb-2">सबै उम्मेदवारहरू हेर्नुहोस्</h3>
+        <p class="text-muted-foreground text-sm mb-4">Browse all {totalCandidates.toLocaleString()} candidates with advanced filters</p>
+        <a href="/candidates" class="inline-block px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-colors text-sm">
+          View All Candidates →
+        </a>
+      </div>
+
     </main>
-    <script is:inline define:vars={{ partyChartData, qualChartData }}>
-      // -----------------------------
-      // Chart.js Configuration
-      // -----------------------------
-      document.addEventListener("DOMContentLoaded", function() {
-        const CHART_COLORS = [
-          "hsl(215, 55%, 35%)", // Deep blue
-          "hsl(350, 55%, 50%)", // Crimson
-          "hsl(160, 50%, 45%)", // Green
-          "hsl(35, 70%, 55%)",  // Orange/Yellow
-          "hsl(270, 40%, 55%)", // Purple
-          "hsl(190, 55%, 45%)", // Cyan
-          "hsl(25, 65%, 50%)",  // Orange
-          "hsl(200, 15%, 50%)", // Gray blue
+
+    <script is:inline define:vars={{ eduData, genderData, partyChartData, totalCandidates }}>
+      document.addEventListener('DOMContentLoaded', function() {
+        var COLORS = [
+          '#3b82f6','#ef4444','#22c55e','#f59e0b','#8b5cf6',
+          '#06b6d4','#f97316','#64748b','#ec4899','#14b8a6'
         ];
 
-        // 1. Party Bar Chart (Horizontal)
-        const ctxParty = document.getElementById('partyChart');
-        if (ctxParty && partyChartData.length > 0) {
-          
-          // Helper to abbreviate long party names exactly like their getShortPartyName()
-          const getShortName = (name) => {
-            const map = {
-              "नेपाल कम्युनिष्ट पार्टी (एकीकृत मार्क्सवादी लेनिनवादी)": "नेकपा एमाले",
-              "नेपाली काँग्रेस": "काँग्रेस",
-              "नेपाल कम्युनिष्ट पार्टी (माओवादी केन्द्र)": "माओवादी केन्द्र",
-              "राष्ट्रिय स्वतन्त्र पार्टी": "रास्वपा",
-              "राष्ट्रिय प्रजातन्त्र पार्टी": "राप्रपा",
-              "जनता समाजवादी पार्टी, नेपाल": "जसपा"
-            };
-            return map[name] || (name.length > 20 ? name.substring(0, 20) + '...' : name);
-          };
-
-          const labels = partyChartData.map(d => getShortName(d.name));
-          const data = partyChartData.map(d => d.value);
-          const fullNames = partyChartData.map(d => d.name);
-
-          new Chart(ctxParty, {
-            type: 'bar',
-            data: {
-              labels: labels,
-              datasets: [{
-                data: data,
-                backgroundColor: CHART_COLORS,
-                borderWidth: 0,
-                borderRadius: 4,
-                barPercentage: 0.6
-              }]
-            },
-            options: {
-              indexAxis: 'y', // Horizontal
-              maintainAspectRatio: false,
-              plugins: {
-                legend: { display: false },
-                tooltip: {
-                  backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                  titleColor: '#000',
-                  bodyColor: '#333',
-                  borderColor: '#e2e8f0',
-                  borderWidth: 1,
-                  padding: 10,
-                  callbacks: {
-                    title: (ctx) => `${ctx[0].raw.toLocaleString()} उम्मेदवार`,
-                    label: (ctx) => fullNames[ctx.dataIndex]
-                  }
-                }
-              },
-              scales: {
-                x: {
-                  grid: { color: '#f1f5f9', drawBorder: false },
-                  ticks: { font: { size: 12 }, color: '#64748b' }
-                },
-                y: {
-                  grid: { display: false },
-                  ticks: { font: { size: 11, family: 'Noto Sans Devanagari' }, color: '#0f172a' }
-                }
-              }
-            }
-          });
-        }
-
-        // 2. Qualification Pie Chart (Doughnut style)
-        const ctxQual = document.getElementById('qualificationChart');
-        if (ctxQual && qualChartData.length > 0) {
-          const labels = qualChartData.map(d => d.name);
-          const data = qualChartData.map(d => d.value);
-
-          new Chart(ctxQual, {
+        // ── Education Doughnut ──
+        var eduCtx = document.getElementById('eduChart');
+        if (eduCtx) {
+          new Chart(eduCtx, {
             type: 'doughnut',
             data: {
-              labels: labels,
+              labels: eduData.map(function(d){return d.name;}),
               datasets: [{
-                data: data,
-                backgroundColor: CHART_COLORS,
-                borderWidth: 2,
-                borderColor: '#ffffff'
+                data: eduData.map(function(d){return d.value;}),
+                backgroundColor: COLORS,
+                borderColor: '#fff', borderWidth: 2
               }]
             },
             options: {
-              maintainAspectRatio: false,
-              cutout: '60%', // Matches innerRadius: 50
+              responsive: true, maintainAspectRatio: false, cutout: '55%',
               plugins: {
-                legend: {
-                  position: 'right',
-                  labels: {
-                    pointStyle: 'circle',
-                    usePointStyle: true,
-                    boxWidth: 8,
-                    font: { size: 11 }
-                  }
-                },
+                legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
                 tooltip: {
-                  backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                  titleColor: '#000',
-                  bodyColor: '#333',
-                  borderColor: '#e2e8f0',
-                  borderWidth: 1,
-                  padding: 10,
                   callbacks: {
-                    label: (ctx) => {
-                      const value = ctx.raw;
-                      const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
-                      const percentage = ((value / total) * 100).toFixed(1);
-                      return ` ${value.toLocaleString()} (${percentage}%)`;
+                    label: function(ctx) {
+                      var total = ctx.dataset.data.reduce(function(a,b){return a+b;},0);
+                      return ' ' + ctx.raw.toLocaleString() + ' (' + ((ctx.raw/total)*100).toFixed(1) + '%)';
                     }
                   }
                 }
@@ -340,6 +369,84 @@ const qualChartData = Object.entries(qualificationCounts)
             }
           });
         }
+
+        // ── Gender Doughnut ──
+        var genderCtx = document.getElementById('genderChart');
+        if (genderCtx) {
+          var gColors = ['#3b82f6', '#ec4899', '#94a3b8'];
+          new Chart(genderCtx, {
+            type: 'doughnut',
+            data: {
+              labels: genderData.map(function(d){return d.name;}),
+              datasets: [{
+                data: genderData.map(function(d){return d.value;}),
+                backgroundColor: gColors,
+                borderColor: '#fff', borderWidth: 2
+              }]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false, cutout: '55%',
+              plugins: {
+                legend: { position: 'right', labels: { boxWidth: 10, font: { size: 11 }, padding: 10, usePointStyle: true, pointStyle: 'circle' } },
+                tooltip: {
+                  callbacks: {
+                    label: function(ctx) {
+                      var total = ctx.dataset.data.reduce(function(a,b){return a+b;},0);
+                      return ' ' + ctx.raw.toLocaleString() + ' (' + ((ctx.raw/total)*100).toFixed(1) + '%)';
+                    }
+                  }
+                }
+              }
+            }
+          });
+        }
+
+        // ── Party Horizontal Bar ──
+        var partyCtx = document.getElementById('partyChart');
+        if (partyCtx) {
+          var shortNames = {
+            "\u0928\u0947\u092a\u093e\u0932\u0940 \u0915\u093e\u0901\u0917\u094d\u0930\u0947\u0938": "\u0915\u093e\u0901\u0917\u094d\u0930\u0947\u0938",
+            "\u0928\u0947\u092a\u093e\u0932 \u0915\u092e\u094d\u092f\u0941\u0928\u093f\u0937\u094d\u091f \u092a\u093e\u0930\u094d\u091f\u0940 (\u090f\u0915\u0940\u0915\u0943\u0924 \u092e\u093e\u0930\u094d\u0915\u094d\u0938\u0935\u093e\u0926\u0940 \u0932\u0947\u0928\u093f\u0928\u0935\u093e\u0926\u0940)": "\u090f\u092e\u093e\u0932\u0947",
+            "\u0928\u0947\u092a\u093e\u0932 \u0915\u092e\u094d\u092f\u0941\u0928\u093f\u0937\u094d\u091f \u092a\u093e\u0930\u094d\u091f\u0940 (\u092e\u093e\u0913\u0935\u093e\u0926\u0940 \u0915\u0947\u0928\u094d\u0926\u094d\u0930)": "\u092e\u093e\u0913\u0935\u093e\u0926\u0940",
+            "\u0930\u093e\u0937\u094d\u091f\u094d\u0930\u093f\u092f \u0938\u094d\u0935\u0924\u0928\u094d\u0924\u094d\u0930 \u092a\u093e\u0930\u094d\u091f\u0940": "\u0930\u093e.\u0938\u094d\u0935.\u092a\u093e.",
+            "\u0930\u093e\u0937\u094d\u091f\u094d\u0930\u093f\u092f \u092a\u094d\u0930\u091c\u093e\u0924\u0928\u094d\u0924\u094d\u0930 \u092a\u093e\u0930\u094d\u091f\u0940": "\u0930\u093e\u092a\u094d\u0930\u092a\u093e",
+            "\u091c\u0928\u0924\u093e \u0938\u092e\u093e\u091c\u0935\u093e\u0926\u0940 \u092a\u093e\u0930\u094d\u091f\u0940, \u0928\u0947\u092a\u093e\u0932": "\u091c\u0938\u092a\u093e",
+            "\u0938\u094d\u0935\u0924\u0928\u094d\u0924\u094d\u0930": "\u0938\u094d\u0935\u0924\u0928\u094d\u0924\u094d\u0930",
+            "\u0905\u0928\u094d\u092f (\u004f\u0074\u0068\u0065\u0072\u0073)": "\u0905\u0928\u094d\u092f",
+          };
+          var labels = partyChartData.map(function(d) { return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name); });
+
+          new Chart(partyCtx, {
+            type: 'bar',
+            data: {
+              labels: labels,
+              datasets: [{
+                data: partyChartData.map(function(d){return d.value;}),
+                backgroundColor: COLORS,
+                borderWidth: 0, borderRadius: 4, barPercentage: 0.65
+              }]
+            },
+            options: {
+              indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: { title: function(ctx) { return partyChartData[ctx[0].dataIndex].name; } }
+                }
+              },
+              scales: {
+                x: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 10 } } },
+                y: { grid: { display: false }, ticks: { font: { size: 10 } } }
+              }
+            }
+          });
+        }
+
+        // Photo lazy-load for featured candidates
+        document.querySelectorAll('.featured-photo').forEach(function(img) {
+          img.addEventListener('load', function() { img.classList.remove('opacity-0'); });
+          img.addEventListener('error', function() { img.remove(); });
+        });
       });
     </script>
   </body>
