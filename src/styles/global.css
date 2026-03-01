@@ -59,6 +59,58 @@
     --gradient-card: linear-gradient(180deg, hsl(45 40% 99%) 0%, hsl(35 25% 96%) 100%);
     --gradient-accent: linear-gradient(135deg, hsl(350 65% 50%) 0%, hsl(350 55% 60%) 100%);
   }
+
+  .dark {
+    /* Core backgrounds */
+    --background: 220 30% 8%;
+    --foreground: 215 20% 95%;
+
+    /* Cards with darker tone */
+    --card: 220 30% 12%;
+    --card-foreground: 215 20% 95%;
+
+    /* Popovers and overlays */
+    --popover: 220 30% 12%;
+    --popover-foreground: 215 20% 95%;
+
+    /* Primary - Distinctive Blue */
+    --primary: 215 60% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary - Low contrast for less important elements */
+    --secondary: 220 25% 18%;
+    --secondary-foreground: 215 20% 95%;
+
+    /* Muted - Soft backgrounds */
+    --muted: 220 25% 15%;
+    --muted-foreground: 215 15% 65%;
+
+    /* Accent - Nepal Crimson */
+    --accent: 350 65% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Success - Green for positive stats */
+    --success: 160 50% 45%;
+    --success-foreground: 0 0% 100%;
+
+    /* Warning - Amber */
+    --warning: 40 85% 50%;
+    --warning-foreground: 220 30% 8%;
+
+    /* Destructive */
+    --destructive: 0 60% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Borders and inputs */
+    --border: 220 25% 20%;
+    --input: 220 25% 20%;
+    --ring: 215 60% 50%;
+
+    /* Custom gradients */
+    --gradient-hero: linear-gradient(135deg, hsl(220 30% 15%) 0%, hsl(220 30% 8%) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(220 30% 12%) 0%, hsl(220 30% 10%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(350 60% 45%) 0%, hsl(350 50% 35%) 100%);
+  }
 }
 
 @layer base {
@@ -84,6 +136,7 @@
 }
 
 @layer components {
+
   /* Stat card variants */
   .stat-card {
     background-color: hsl(var(--card));
@@ -95,7 +148,7 @@
     transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
     transition-duration: 200ms;
   }
-  
+
   .stat-card:hover {
     box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
     border-color: hsl(var(--primary) / 0.2);
@@ -112,7 +165,7 @@
     transition-duration: 200ms;
     cursor: pointer;
   }
-  
+
   .candidate-card:hover {
     box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
     border-color: hsl(var(--primary) / 0.3);

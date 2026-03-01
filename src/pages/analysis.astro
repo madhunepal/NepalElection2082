@@ -3,6 +3,7 @@ export const prerender = false;
 import { createClient } from '@supabase/supabase-js';
 import '../styles/global.css';
 import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
 
 const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || process.env.PUBLIC_SUPABASE_URL;
 const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || process.env.PUBLIC_SUPABASE_ANON_KEY;
@@ -138,10 +139,11 @@ const provinceChartData = Object.entries(provinceCounts)
         </div>
       </div>
     </main>
+
+    <Footer />
     <script is:inline define:vars={{ partyChartData, qualChartData, provinceChartData }}>
       // -----------------------------
       // Chart.js Configuration
-      // -----------------------------
       document.addEventListener("DOMContentLoaded", function() {
         const CHART_COLORS = [
           "hsl(215, 55%, 35%)", // Deep blue
@@ -153,6 +155,12 @@ const provinceChartData = Object.entries(provinceCounts)
           "hsl(25, 65%, 50%)",  // Orange
           "hsl(200, 15%, 50%)", // Gray blue
         ];
+
+        function getTextColor() { return document.documentElement.classList.contains('dark') ? '#e2e8f0' : '#475569'; }
+        function getGridColor() { return document.documentElement.classList.contains('dark') ? '#334155' : '#f1f5f9'; }
+        function getBorderColor() { return document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff'; }
+        
+        var charts = [];
 
         // 1. Party Bar Chart (Horizontal)
         const ctxParty = document.getElementById('partyChart');
@@ -243,6 +251,7 @@ const provinceChartData = Object.entries(provinceCounts)
                 legend: {
                   position: 'right',
                   labels: {
+                    color: getTextColor(),
                     pointStyle: 'circle',
                     usePointStyle: true,
                     boxWidth: 8,
@@ -268,6 +277,7 @@ const provinceChartData = Object.entries(provinceCounts)
               }
             }
           });
+          charts.push(qualChart);
         }
         // 3. Province Bar Chart (Horizontal)
         const ctxProvince = document.getElementById('provinceChart');

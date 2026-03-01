@@ -3,6 +3,7 @@ export const prerender = false;
 import { createClient } from '@supabase/supabase-js';
 import '../styles/global.css';
 import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
 
 const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || process.env.PUBLIC_SUPABASE_URL;
 const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || process.env.PUBLIC_SUPABASE_ANON_KEY;
@@ -94,17 +95,17 @@ const uniqueAreas = selectedDistrict !== 'all'
 // ── Helpers ─────────────────────────────────────────────────
 function partyColor(party: string) {
   const m: Record<string,string> = {
-    "नेपाली काँग्रेस": "bg-green-100 text-green-800 border-green-200",
-    "नेपाल कम्युनिष्ट पार्टी (एकीकृत मार्क्सवादी लेनिनवादी)": "bg-red-100 text-red-800 border-red-200",
-    "नेकपा एमाले": "bg-red-100 text-red-800 border-red-200",
-    "नेपाल कम्युनिष्ट पार्टी (माओवादी केन्द्र)": "bg-rose-100 text-rose-800 border-rose-200",
-    "नेपाल कम्युनिस्ट पार्टी (माओवादी)": "bg-rose-100 text-rose-800 border-rose-200",
-    "राष्ट्रिय स्वतन्त्र पार्टी": "bg-blue-100 text-blue-800 border-blue-200",
-    "राष्ट्रिय प्रजातन्त्र पार्टी": "bg-purple-100 text-purple-800 border-purple-200",
-    "जनता समाजवादी पार्टी, नेपाल": "bg-yellow-100 text-yellow-800 border-yellow-200",
-    "स्वतन्त्र": "bg-gray-100 text-gray-800 border-gray-200",
+    "नेपाली काँग्रेस": "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800",
+    "नेपाल कम्युनिष्ट पार्टी (एकीकृत मार्क्सवादी लेनिनवादी)": "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800",
+    "नेकपा एमाले": "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800",
+    "नेपाल कम्युनिष्ट पार्टी (माओवादी केन्द्र)": "bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:border-rose-800",
+    "नेपाल कम्युनिस्ट पार्टी (माओवादी)": "bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:border-rose-800",
+    "राष्ट्रिय स्वतन्त्र पार्टी": "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800",
+    "राष्ट्रिय प्रजातन्त्र पार्टी": "bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:border-purple-800",
+    "जनता समाजवादी पार्टी, नेपाल": "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800",
+    "स्वतन्त्र": "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700",
   };
-  return m[party] || "bg-slate-100 text-slate-700 border-slate-200";
+  return m[party] || "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700";
 }
 
 function shortParty(p: string) {
@@ -223,13 +224,13 @@ function pageUrl(p: number) {
       </form>
 
       <!-- Inline loading banner (shown between filters and results) -->
-      <div id="loadingBanner" style="display:none" class="flex items-center justify-center gap-3 py-6 mb-4 bg-blue-50 border border-blue-200 rounded-xl">
-        <div class="h-6 w-6 animate-spin rounded-full border-3 border-blue-600 border-t-transparent"></div>
-        <span class="text-lg font-semibold text-blue-700">Loading candidates…</span>
+      <div id="loadingBanner" style="display:none" class="flex items-center justify-center gap-3 py-6 mb-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-900/50 rounded-xl">
+        <div class="h-6 w-6 animate-spin rounded-full border-3 border-blue-600 dark:border-blue-400 border-t-transparent dark:border-t-transparent"></div>
+        <span class="text-lg font-semibold text-blue-700 dark:text-blue-400">Loading candidates…</span>
       </div>
 
       {error && (
-        <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded mb-6 text-red-700 text-sm">Error: {error.message}</div>
+        <div class="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded mb-6 text-red-700 dark:text-red-400 text-sm">Error: {error.message}</div>
       )}
 
       {!error && (
@@ -275,7 +276,7 @@ function pageUrl(p: number) {
                             {shortParty(c.party)}
                           </span>
                           {c.symbol_name && (
-                            <span class="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                            <span class="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-full px-2 py-0.5">
                               ⚑ {c.symbol_name}
                             </span>
                           )}
@@ -316,11 +317,13 @@ function pageUrl(p: number) {
       )}
     </main>
 
+    <Footer />
+
     <!-- ── MODAL ── -->
     <div id="candidateModal" class="fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
       <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeCandidateModal()"></div>
       <div class="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto z-10">
-        <button onclick="closeCandidateModal()" class="absolute top-3 right-3 p-2 rounded-full bg-secondary hover:bg-red-100 hover:text-red-600 transition-colors z-20">
+        <button onclick="closeCandidateModal()" class="absolute top-3 right-3 p-2 rounded-full bg-secondary hover:bg-red-100 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 transition-colors z-20">
           <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
         <div id="modalBody" class="p-6 pt-5"></div>
@@ -459,14 +462,14 @@ function pageUrl(p: number) {
           ].filter(function(r) { return r[1] && r[1] !== '0' && r[1] !== '-'; });
 
           var html = '<div class="flex items-start gap-4 mb-5 pr-8">';
-          html += '<div class="relative h-20 w-20 rounded-full bg-slate-100 overflow-hidden shrink-0 border-2 border-slate-200 flex-none">';
-          html += '<div class="absolute inset-0 flex items-center justify-center text-2xl font-bold text-slate-400">' + (c.name ? c.name.charAt(0) : '?') + '</div>';
+          html += '<div class="relative h-20 w-20 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden shrink-0 border-2 border-slate-200 dark:border-slate-700 flex-none">';
+          html += '<div class="absolute inset-0 flex items-center justify-center text-2xl font-bold text-slate-400 dark:text-slate-500">' + (c.name ? c.name.charAt(0) : '?') + '</div>';
           if (photoUrl) html += '<img src="' + photoUrl + '" class="absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity" onload="this.classList.remove(\'opacity-0\')" onerror="this.remove()">';
           html += '</div><div class="flex-1 min-w-0">';
           html += '<h2 class="text-xl font-bold leading-snug">' + (c.name || '\u2014') + '</h2>';
           if (c.party) html += '<p class="text-sm text-muted-foreground mt-0.5">' + c.party + '</p>';
-          if (c.symbol_name) html += '<div class="mt-1.5 inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-xs px-2 py-0.5 rounded-full border border-amber-200">\u26f3 ' + c.symbol_name + '</div>';
-          html += '<div class="mt-1.5 inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full border border-blue-200 ml-1">\ud83d\udccd ' + areaLabel + '</div>';
+          if (c.symbol_name) html += '<div class="mt-1.5 inline-flex items-center gap-1 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-xs px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">\u26f3 ' + c.symbol_name + '</div>';
+          html += '<div class="mt-1.5 inline-flex items-center gap-1 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-xs px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-800 ml-1">\ud83d\udccd ' + areaLabel + '</div>';
           html += '</div></div>';
           html += '<div class="rounded-xl border border-border overflow-hidden text-sm divide-y divide-border">';
           rows.forEach(function(row, i) {

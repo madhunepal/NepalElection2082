@@ -3,6 +3,7 @@ export const prerender = false;
 import { createClient } from '@supabase/supabase-js';
 import '../styles/global.css';
 import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
 
 const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || process.env.PUBLIC_SUPABASE_URL;
 const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || process.env.PUBLIC_SUPABASE_ANON_KEY;
@@ -214,7 +215,7 @@ featuredMatchups.forEach(m => {
             <p class="text-3xl font-bold text-foreground">18.9M</p>
             <p class="text-xs text-muted-foreground mt-1">कुल मतदाता</p>
           </div>
-          <div class="bg-blue-50 border border-blue-200 p-3 rounded-xl text-blue-600">
+          <div class="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-3 rounded-xl text-blue-600 dark:text-blue-400">
             <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           </div>
         </div>
@@ -228,7 +229,7 @@ featuredMatchups.forEach(m => {
             <p class="text-3xl font-bold text-foreground group-hover:text-green-600 transition-colors">{totalCandidates.toLocaleString()}</p>
             <p class="text-xs text-muted-foreground mt-1">कुल उम्मेदवार • <span class="text-green-600 group-hover:underline">View all →</span></p>
           </div>
-          <div class="bg-green-50 border border-green-200 p-3 rounded-xl text-green-600">
+          <div class="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 p-3 rounded-xl text-green-600 dark:text-green-400">
             <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
           </div>
         </a>
@@ -242,7 +243,7 @@ featuredMatchups.forEach(m => {
             <p class="text-3xl font-bold text-foreground group-hover:text-purple-600 transition-colors">275</p>
             <p class="text-xs text-muted-foreground mt-1">प्रतिनिधि सभा सीट • <span class="text-purple-600 group-hover:underline">View results →</span></p>
           </div>
-          <div class="bg-purple-50 border border-purple-200 p-3 rounded-xl text-purple-600">
+          <div class="bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-800 p-3 rounded-xl text-purple-600 dark:text-purple-400">
             <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
           </div>
         </a>
@@ -256,7 +257,7 @@ featuredMatchups.forEach(m => {
             <p class="text-3xl font-bold text-foreground">{totalParties}</p>
             <p class="text-xs text-muted-foreground mt-1">राजनीतिक दलहरू</p>
           </div>
-          <div class="bg-amber-50 border border-amber-200 p-3 rounded-xl text-amber-600">
+          <div class="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 p-3 rounded-xl text-amber-600 dark:text-amber-400">
             <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
           </div>
         </div>
@@ -306,10 +307,10 @@ featuredMatchups.forEach(m => {
               <!-- Location + tag -->
               <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-2">
-                  <span class="text-blue-600">📍</span>
+                  <span class="text-blue-600 dark:text-blue-400">📍</span>
                   <span class="font-semibold text-sm text-foreground">{matchup.label}</span>
                 </div>
-                <span class="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200 font-medium">
+                <span class="text-xs px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 font-medium">
                   {matchup.tag}
                 </span>
               </div>
@@ -323,8 +324,8 @@ featuredMatchups.forEach(m => {
                   return (
                     <div class="flex-1 text-center">
                       <!-- Photo -->
-                      <div class="relative h-16 w-16 mx-auto rounded-full bg-slate-100 overflow-hidden border-2 border-slate-200 mb-2">
-                        <div class="absolute inset-0 flex items-center justify-center text-slate-400 font-bold text-lg">
+                      <div class="relative h-16 w-16 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden border-2 border-slate-200 dark:border-slate-700 mb-2">
+                        <div class="absolute inset-0 flex items-center justify-center text-slate-400 dark:text-slate-500 font-bold text-lg">
                           {c.name.charAt(0)}
                         </div>
                         {photoUrl && (
@@ -352,15 +353,17 @@ featuredMatchups.forEach(m => {
       </div>
 
       <!-- ══════════ CTA: See All Candidates ══════════ -->
-      <div class="text-center py-8 bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-2xl mb-8">
+      <div class="text-center py-8 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 border border-blue-200 dark:border-blue-900/50 rounded-2xl mb-8">
         <h3 class="text-xl font-bold text-foreground mb-2">सबै उम्मेदवारहरू हेर्नुहोस्</h3>
         <p class="text-muted-foreground text-sm mb-4">Browse all {totalCandidates.toLocaleString()} candidates with advanced filters</p>
-        <a href="/candidates" class="inline-block px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-colors text-sm">
+        <a href="/candidates" class="inline-block px-8 py-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 text-white font-semibold rounded-lg shadow-md transition-colors text-sm">
           View All Candidates →
         </a>
       </div>
 
     </main>
+
+    <Footer />
 
     <script is:inline define:vars={{ eduData, genderData, partyChartData, totalCandidates }}>
       document.addEventListener('DOMContentLoaded', function() {
@@ -368,6 +371,19 @@ featuredMatchups.forEach(m => {
           '#3b82f6','#ef4444','#22c55e','#f59e0b','#8b5cf6',
           '#06b6d4','#f97316','#64748b','#ec4899','#14b8a6'
         ];
+        
+        // Theme aware text color helper
+        function getTextColor() {
+          return document.documentElement.classList.contains('dark') ? '#e2e8f0' : '#475569';
+        }
+        function getGridColor() {
+          return document.documentElement.classList.contains('dark') ? '#334155' : '#f1f5f9';
+        }
+        function getBorderColor() {
+          return document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff';
+        }
+
+        var charts = [];
 
         // ── Education Doughnut ──
         var eduCtx = document.getElementById('eduChart');
@@ -385,7 +401,7 @@ featuredMatchups.forEach(m => {
             options: {
               responsive: true, maintainAspectRatio: false, cutout: '55%',
               plugins: {
-                legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
+                legend: { position: 'right', labels: { color: getTextColor(), boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
                 tooltip: {
                   callbacks: {
                     label: function(ctx) {
@@ -397,6 +413,7 @@ featuredMatchups.forEach(m => {
               }
             }
           });
+          charts.push(eduChart);
         }
 
         // ── Gender Doughnut ──
@@ -416,7 +433,7 @@ featuredMatchups.forEach(m => {
             options: {
               responsive: true, maintainAspectRatio: false, cutout: '55%',
               plugins: {
-                legend: { position: 'right', labels: { boxWidth: 10, font: { size: 11 }, padding: 10, usePointStyle: true, pointStyle: 'circle' } },
+                legend: { position: 'right', labels: { color: getTextColor(), boxWidth: 10, font: { size: 11 }, padding: 10, usePointStyle: true, pointStyle: 'circle' } },
                 tooltip: {
                   callbacks: {
                     label: function(ctx) {
@@ -428,6 +445,7 @@ featuredMatchups.forEach(m => {
               }
             }
           });
+          charts.push(genderChart);
         }
 
         // ── Party Horizontal Bar ──
@@ -464,12 +482,39 @@ featuredMatchups.forEach(m => {
                 }
               },
               scales: {
-                x: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 10 } } },
-                y: { grid: { display: false }, ticks: { font: { size: 10 } } }
+                x: { grid: { color: getGridColor() }, ticks: { color: getTextColor(), font: { size: 10 } } },
+                y: { grid: { display: false }, ticks: { color: getTextColor(), font: { size: 10 } } }
               }
             }
           });
+          charts.push(partyChart);
         }
+
+        // Apply dark mode overrides dynamically
+        function updateChartThemes() {
+          var tColor = getTextColor();
+          var gColor = getGridColor();
+          var bColor = getBorderColor();
+          charts.forEach(function(c) {
+            if (c.config.type === 'doughnut') {
+              c.options.plugins.legend.labels.color = tColor;
+              c.data.datasets[0].borderColor = bColor;
+            } else if (c.config.type === 'bar') {
+              c.options.scales.x.ticks.color = tColor;
+              c.options.scales.x.grid.color = gColor;
+              c.options.scales.y.ticks.color = tColor;
+            }
+            c.update();
+          });
+        }
+
+        // Listen for class changes on HTML tag
+        var observer = new MutationObserver(function(mutations) {
+          mutations.forEach(function(m) {
+            if (m.attributeName === 'class') updateChartThemes();
+          });
+        });
+        observer.observe(document.documentElement, { attributes: true });
 
         // Photo lazy-load for featured candidates
         document.querySelectorAll('.featured-photo').forEach(function(img) {

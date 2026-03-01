@@ -1,6 +1,7 @@
 ---
 import '../styles/global.css';
 import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
 ---
 
 <html lang="ne">
@@ -17,7 +18,7 @@ import Header from '../components/Header.astro';
 
     <main class="container mx-auto px-4 py-8 flex-1 flex flex-col items-center justify-center">
       <div class="text-center max-w-xl mx-auto py-20">
-        <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-secondary text-primary/80 mb-6">
+        <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-secondary text-primary/80 dark:text-primary mb-6">
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-10 h-10"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
         </div>
         
@@ -33,5 +34,7 @@ import Header from '../components/Header.astro';
         </a>
       </div>
     </main>
+
+    <Footer />
   </body>
 </html>
