@@ -334,7 +334,9 @@ function encodeCandidate(c: any): string {
       function openCandidateModal(card) {
         try {
           var encoded = card.getAttribute('data-enc');
-          var c = JSON.parse(atob(encoded));
+          // UTF-8 safe base64 decode (atob alone breaks Nepali Unicode)
+          var bytes = Uint8Array.from(atob(encoded), function(ch) { return ch.charCodeAt(0); });
+          var c = JSON.parse(new TextDecoder().decode(bytes));
 
           var constituency = c.constituency
             ? c.district + ' - \u0915\u094d\u0937\u0947\u0924\u094d\u0930 ' + c.constituency
