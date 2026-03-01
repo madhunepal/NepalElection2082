@@ -193,12 +193,14 @@ const hasNext = currentPage < totalPages;
                class="w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm" 
                placeholder="नाम खोज्नुहोस् (Search Name)..."
                value={searchQuery}
+               onkeypress="if(event.key === 'Enter') window.updateFilters()"
              />
           </div>
 
           <select
             id="provinceSelect"
             class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm flex-1"
+            onchange="window.updateFilters()"
           >
             <option value="all">प्रदेश (Province)</option>
             {uniqueProvinces.map(prov => (
@@ -211,6 +213,7 @@ const hasNext = currentPage < totalPages;
           <select
             id="districtSelect"
             class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm flex-1 md:max-w-xs"
+            onchange="window.updateFilters()"
           >
             <option value="all">जिल्ला (District)</option>
             {uniqueDistricts.map(dist => (
@@ -223,6 +226,7 @@ const hasNext = currentPage < totalPages;
           <select
             id="partySelect"
             class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm flex-1 md:max-w-xs"
+            onchange="window.updateFilters()"
           >
             <option value="all">पार्टी (Party)</option>
             {uniqueParties.map(party => (
@@ -235,6 +239,7 @@ const hasNext = currentPage < totalPages;
           <select
             id="genderSelect"
             class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm flex-1"
+            onchange="window.updateFilters()"
           >
             <option value="all">सबै लिङ्ग (All Genders)</option>
             <option value="पुरुष" selected={selectedGender === 'पुरुष'}>पुरुष (Male)</option>
@@ -242,7 +247,7 @@ const hasNext = currentPage < totalPages;
             <option value="अन्य" selected={selectedGender === 'अन्य'}>अन्य (Other)</option>
           </select>
 
-          <button id="applyFiltersBtn" class="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium rounded-md shadow transition-colors w-full md:w-auto mt-2 md:mt-0 whitespace-nowrap">
+          <button onclick="window.updateFilters()" id="applyFiltersBtn" class="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium rounded-md shadow transition-colors w-full md:w-auto mt-2 md:mt-0 whitespace-nowrap">
             खोज्नुहोस् / Apply
           </button>
         </div>
@@ -350,24 +355,25 @@ const hasNext = currentPage < totalPages;
         </div>
       )}
 
-      <script>
-        function updateFilters() {
-          const provinceInput = document.getElementById('provinceSelect') as HTMLSelectElement;
-          const districtInput = document.getElementById('districtSelect') as HTMLSelectElement;
-          const partyInput = document.getElementById('partySelect') as HTMLSelectElement;
-          const genderInput = document.getElementById('genderSelect') as HTMLSelectElement;
-          const searchInput = document.getElementById('searchInput') as HTMLInputElement;
+      <script is:inline>
+        // Define function strictly on window so HTML onclick hooks can find it
+        window.updateFilters = function() {
+          var provinceInput = document.getElementById('provinceSelect');
+          var districtInput = document.getElementById('districtSelect');
+          var partyInput = document.getElementById('partySelect');
+          var genderInput = document.getElementById('genderSelect');
+          var searchInput = document.getElementById('searchInput');
           
           if (!provinceInput || !districtInput || !partyInput || !genderInput || !searchInput) return;
 
-          const province = provinceInput.value;
-          const district = districtInput.value;
-          const party = partyInput.value;
-          const gender = genderInput.value;
-          const search = searchInput.value;
+          var province = provinceInput.value;
+          var district = districtInput.value;
+          var party = partyInput.value;
+          var gender = genderInput.value;
+          var search = searchInput.value;
           
-          const url = new URL(window.location.href);
-          const searchParams = url.searchParams;
+          var url = new URL(window.location.href);
+          var searchParams = url.searchParams;
 
           // Reset page to 1 when filters change
           searchParams.delete('page');
@@ -389,31 +395,7 @@ const hasNext = currentPage < totalPages;
 
           // Force page reload with new params
           window.location.assign(url.toString());
-        }
-
-        // Initialize event listeners
-        function initFilters() {
-          const applyBtn = document.getElementById('applyFiltersBtn');
-          if (applyBtn) {
-            applyBtn.addEventListener('click', updateFilters);
-          }
-
-          const selects = ['provinceSelect', 'districtSelect', 'partySelect', 'genderSelect'];
-          selects.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.addEventListener('change', updateFilters);
-          });
-
-          const searchInput = document.getElementById('searchInput');
-          if (searchInput) {
-            searchInput.addEventListener('keypress', (e) => {
-              if (e.key === 'Enter') updateFilters();
-            });
-          }
-        }
-
-        // Execute immediately (Astro module scripts are deferred automatically)
-        initFilters();
+        };
       </script>
   </body>
 </html>
