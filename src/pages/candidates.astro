@@ -232,7 +232,7 @@ function pageUrl(p: number) {
             <p class="text-sm text-muted-foreground">
               <strong class="text-foreground">{totalCount}</strong> candidates
               {searchQuery && <span class="ml-1">matching "<em>{searchQuery}</em>"</span>}
-              {selectedDistinct !== 'all' && <span class="ml-1">· {selectedDistrict}</span>}
+              {selectedDistrict !== 'all' && <span class="ml-1">· {selectedDistrict}</span>}
               {selectedConstituency !== 'all' && <span> क्षेत्र {selectedConstituency}</span>}
             </p>
             <span class="text-sm text-muted-foreground">Page {currentPage}/{totalPages || 1}</span>
