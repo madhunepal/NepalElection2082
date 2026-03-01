@@ -51,6 +51,7 @@ function classifyEdu(raw: string): string {
 
 const partyGenderCounts: Record<string, { male: number, female: number, total: number }> = {};
 const bachelorsCountByParty: Record<string, number> = {};
+const mastersCountByParty: Record<string, number> = {};
 const provinceCounts: Record<string, number> = {};
 const genderCounts: Record<string, number> = {};
 const ageCounts: Record<string, number> = {
@@ -79,10 +80,15 @@ if (allCandidatesForCharts) {
       provinceCounts[c.province] = (provinceCounts[c.province] || 0) + 1;
     }
 
-    // 3. Education (Bachelors and Above)
+    // 3. Education (Bachelors and Above, Masters and Above)
     const cat = classifyEdu(c.qualification);
-    if (c.party && (cat === 'Bachelors (स्नातक)' || cat === 'Masters (स्नातकोत्तर)' || cat === 'PhD / MPhil')) {
-      bachelorsCountByParty[c.party] = (bachelorsCountByParty[c.party] || 0) + 1;
+    if (c.party) {
+      if (cat === 'Bachelors (स्नातक)' || cat === 'Masters (स्नातकोत्तर)' || cat === 'PhD / MPhil') {
+        bachelorsCountByParty[c.party] = (bachelorsCountByParty[c.party] || 0) + 1;
+      }
+      if (cat === 'Masters (स्नातकोत्तर)' || cat === 'PhD / MPhil') {
+        mastersCountByParty[c.party] = (mastersCountByParty[c.party] || 0) + 1;
+      }
     }
 
     // 4. Gender
@@ -110,6 +116,11 @@ const partyChartData = Object.entries(partyGenderCounts)
   .slice(0, 10);
 
 const qualChartData = Object.entries(bachelorsCountByParty)
+  .map(([name, value]) => ({ name, value }))
+  .sort((a, b) => b.value - a.value)
+  .slice(0, 10); // Top 10 parties with highest highly educated candidates
+
+const mastersChartData = Object.entries(mastersCountByParty)
   .map(([name, value]) => ({ name, value }))
   .sort((a, b) => b.value - a.value)
   .slice(0, 10); // Top 10 parties with highest highly educated candidates
@@ -187,7 +198,7 @@ const ageSummary = `Maximum candidates (${maxAgeGroup.value.toLocaleString()}, $
           </div>
         </div>
 
-        <!-- Qualification Chart -->
+        <!-- Qualification Chart (Bachelors) -->
         <div class="bg-card border border-border rounded-xl p-6 shadow-sm">
           <div class="mb-6">
             <h3 class="font-semibold text-foreground text-lg nepali-text">स्नातक वा सो भन्दा माथि</h3>
@@ -195,6 +206,17 @@ const ageSummary = `Maximum candidates (${maxAgeGroup.value.toLocaleString()}, $
           </div>
           <div class="h-80 w-full relative">
              <canvas id="qualificationChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Qualification Chart (Masters) -->
+        <div class="bg-card border border-border rounded-xl p-6 shadow-sm">
+          <div class="mb-6">
+            <h3 class="font-semibold text-foreground text-lg nepali-text">स्नातकोत्तर वा सो भन्दा माथि</h3>
+            <p class="text-xs text-muted-foreground">Masters & Above by Party</p>
+          </div>
+          <div class="h-80 w-full relative">
+             <canvas id="mastersChart"></canvas>
           </div>
         </div>
 
@@ -215,7 +237,7 @@ const ageSummary = `Maximum candidates (${maxAgeGroup.value.toLocaleString()}, $
     </main>
 
     <Footer />
-    <script is:inline define:vars={{ partyChartData, qualChartData, provinceChartData, genderChartData, ageChartData }}>
+    <script is:inline define:vars={{ partyChartData, qualChartData, mastersChartData, provinceChartData, genderChartData, ageChartData }}>
       // -----------------------------
       // Chart.js Configuration
       document.addEventListener("DOMContentLoaded", function() {
@@ -375,6 +397,71 @@ const ageSummary = `Maximum candidates (${maxAgeGroup.value.toLocaleString()}, $
             }
           });
           charts.push(qualChart);
+        }
+
+        // 2b. Masters and Above Bar Chart
+        const ctxMasters = document.getElementById('mastersChart');
+        if (ctxMasters && mastersChartData.length > 0) {
+          
+          const getShortName = (name) => {
+            const map = {
+              "नेपाल कम्युनिष्ट पार्टी (एकीकृत मार्क्सवादी लेनिनवादी)": "नेकपा एमाले",
+              "नेपाली काँग्रेस": "काँग्रेस",
+              "नेपाल कम्युनिष्ट पार्टी (माओवादी केन्द्र)": "माओवादी केन्द्र",
+              "राष्ट्रिय स्वतन्त्र पार्टी": "रास्वपा",
+              "राष्ट्रिय प्रजातन्त्र पार्टी": "राप्रपा",
+              "जनता समाजवादी पार्टी, नेपाल": "जसपा"
+            };
+            return map[name] || (name.length > 20 ? name.substring(0, 20) + '...' : name);
+          };
+
+          const labels = mastersChartData.map(d => getShortName(d.name));
+          const data = mastersChartData.map(d => d.value);
+          const fullNames = mastersChartData.map(d => d.name);
+
+          const mastersChart = new Chart(ctxMasters, {
+            type: 'bar',
+            data: {
+              labels: labels,
+              datasets: [{
+                data: data,
+                backgroundColor: CHART_COLORS,
+                borderWidth: 0,
+                borderRadius: 4,
+                barPercentage: 0.6
+              }]
+            },
+            options: {
+              indexAxis: 'y', // Horizontal
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                  titleColor: '#000',
+                  bodyColor: '#333',
+                  borderColor: '#e2e8f0',
+                  borderWidth: 1,
+                  padding: 10,
+                  callbacks: {
+                    title: (ctx) => `${ctx[0].raw.toLocaleString()} उम्मेदवार`,
+                    label: (ctx) => fullNames[ctx.dataIndex]
+                  }
+                }
+              },
+              scales: {
+                x: {
+                  grid: { color: getGridColor(), drawBorder: false },
+                  ticks: { font: { size: 12 }, color: getTextColor() }
+                },
+                y: {
+                  grid: { display: false },
+                  ticks: { font: { size: 11, family: 'Noto Sans Devanagari' }, color: getTextColor() }
+                }
+              }
+            }
+          });
+          charts.push(mastersChart);
         }
 
         // 3. Age Pie Chart (Doughnut style)
