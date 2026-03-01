@@ -30,26 +30,37 @@ const totalCandidates = allCandidates.length;
 const uniqueParties = [...new Set(allCandidates.map(c => c.party).filter(Boolean))];
 const totalParties = uniqueParties.length;
 
-// ── Education level aggregation ─────────────────────────────
+// ── Education level aggregation (user-defined 6 buckets) ─────
+function classifyEdu(raw: string): string {
+  const q = (raw || '').trim().toLowerCase();
+  if (!q || q === '-' || q === '0' || q === 'y') return 'Other (अन्य)';
+
+  // PhD / MPhil
+  if (/ph\.?d|\u092a\u093f\.?\u090f\u091a\.?\u0921\u093f|\u092a\u093f\.?\u090f\u091a\.?\u0921\u0940|\u0935\u093f\u0926\u094d\u092f\u093e\u0935\u093e\u0930\u093f\u0927\u093f|\u0935\u093f\u0926\u094d\u092f\u093e\u0935\u093e\u0930\u093f\u0928|\u0935\u093f\u0926\u094d\u092f\u093e \u0935\u093e\u0930\u093f\u0923\u0940|\u0935\u093f\u0926\u094d\u092f\u093e\u0935\u093e\u0930\u093f|\u092c\u093f\u0926\u094d\u092f\u093e\u092c\u093e\u0930\u0940\u0927\u0940|\u092c\u093f\u0926\u094d\u092f\u093e\u0935\u093e\u0930\u0940\u0927\u0940|m\.?phil|\u090f\u092e\.?\u092b\u093f\u0932/i.test(q)) return 'PhD / MPhil';
+
+  // Masters
+  if (/master|\u0938\u094d\u0928\u093e\u0924\u0915\u094b\u0924\u094d\u0924\u0930|\u0938\u094d\u200d?\u0928\u093e\u0924\u0915\u094b\u0924\u094d\u0924\u0930|\u0938\u094d\u0928\u093e\u0915\u094b\u0924\u094d\u0924\u0930|\u092e\u093e\u0938\u094d\u091f\u0930|msc|m\.b\.s|m\.ed|m\.ba|m\.sc|m\.a|ma |\u090f\u092e\.?\u090f|\u090f\u092e \u092c\u093f \u090f|\u090f\u092e\.?\u0935\u093f\.?\u090f|mbs|mba|llm|m\.com|\u090f\u092e \u090f/i.test(q)) return 'Masters (स्नातकोत्तर)';
+
+  // Bachelors
+  if (/bachelor|\u0938\u094d\u0928\u093e\u0924\u0915|\u0938\u094d\u200d?\u0928\u093e\u0924\u0915|b\.?a|b\.?sc|b\.?ed|b\.?e\b|b\.?eng|b\.?com|b\.?b|bds|bba|bbs|llb|\u0935\u093f\.\u090f\u0921|\u0935\u093f\.\u090f|\u0935\u093f\.\u090f\u0932|\u0935\u093f\.\u090f\u0938|\u092c\u093f\.?\u090f|\u092c\u093f \u090f\u0938\u0938\u0940|\u090f\u0932\u090f\u0932\u092c\u0940|\u0928\u0930\u094d\u0938\u093f\u0919/i.test(q) && !/\u0938\u094d\u0928\u093e\u0924\u0915\u094b\u0924\u094d\u0924\u0930/i.test(q)) return 'Bachelors (स्नातक)';
+
+  // +2 / Intermediate
+  if (/\+2|\+\u0968|10\+2|12 |12\b|\u0661\u0662|i\.?a\b|i\.?sc|i\.?ed|i\.?com|hseb|\u0906\u0908\.?\u090f|\u0906\u0907 \u090f|\u092a\u094d\u0930\u092e\u093e\u0923\u092a\u0924\u094d\u0930|\u092a\u094d\u0930\u092e\u093e\u0923 \u092a\u0924\u094d\u0930|\u092a\u094d\u0930\u0935\u093f\u0923\u0924\u093e|\u092a\u094d\u0930\u0935\u093f\u0923\u0924\u093e|\u092a\u094d\u0930\u0935\u0940\u0923\u0924\u093e|\u092a\u094d\u0930\u0935\u093f\u0923\u093f\u0924\u093e|\u092a\u094d\u0932\u0938 \u091f\u0941|intermediate|diploma|\u0909\u091a\u094d\u091a \u0936\u093f\u0915\u094d\u0937\u093e|certificate|\u0661\u0968 \u092a\u093e\u0938/i.test(q)) return '+2 / Intermediate';
+
+  // SLC / SEE
+  if (/slc|see|s\.l\.c|\u090f\u0938\.?\u090f\u0932\.?\u0938\u093f|\u090f\u0938\.?\u090f\u0932\.?\u0938\u0940|\u090f\u0938 \u090f\u0932 \u0938\u093f|\u090f\u0938 \u090f\u0932 \u0938\u0940|\u090f\u0938\u090f\u0932\u0938\u0940|\u0915\u0915\u094d\u0937\u093e \u0661\u0960|\u0915\u0915\u094d\u0937\u093e 10|\u092e\u093e\u0927\u094d\u092f\u092e\u093f\u0915|10 pass|\u0661\u0960 \u092a\u093e\u0938|\u0661\u0960$/i.test(q) || q === '10' || q === '\u0661\u0960') return 'SLC / SEE';
+
+  return 'Other (अन्य)';
+}
+
 const eduMap: Record<string, number> = {};
 allCandidates.forEach(c => {
-  let q = (c.qualification || '').trim();
-  // Normalize
-  if (!q || q === '-' || q === '0') q = 'अन्य (Other)';
-  else if (/master|एम\.|m\.a|m\.sc|m\.ed|m\.b|m\.phil/i.test(q)) q = 'Masters';
-  else if (/bachelor|b\.a|b\.sc|b\.ed|b\.e|b\.eng|b\.com|b\.b|स्नातक/i.test(q)) q = 'Bachelors (स्नातक)';
-  else if (/ph\.d|पि\.एच/i.test(q)) q = 'Ph.D';
-  else if (/10\+2|\+2|twelve|intermediate|12 pass|i\.a|i\.sc|i\.ed|i\.com|cert|diploma|प्रमाणपत्र|उच्च माध्य|hseb/i.test(q)) q = '+2 / Intermediate';
-  else if (/s\.l\.c|slc|see|10 pass|एस\.एल\.सी|माध्यमिक/i.test(q)) q = 'SLC / SEE';
-  else if (/literate|साक्षर|primary|प्राथमिक/i.test(q)) q = 'Literate (साक्षर)';
-  else if (q.length < 30) q = q; // keep short labels as-is
-  else q = 'अन्य (Other)';
-
-  eduMap[q] = (eduMap[q] || 0) + 1;
+  const cat = classifyEdu(c.qualification);
+  eduMap[cat] = (eduMap[cat] || 0) + 1;
 });
-const eduData = Object.entries(eduMap)
-  .map(([name, value]) => ({ name, value }))
-  .sort((a, b) => b.value - a.value);
+// Fixed order for the pie chart
+const eduOrder = ['PhD / MPhil', 'Masters (स्नातकोत्तर)', 'Bachelors (स्नातक)', '+2 / Intermediate', 'SLC / SEE', 'Other (अन्य)'];
+const eduData = eduOrder.filter(k => eduMap[k]).map(k => ({ name: k, value: eduMap[k] }));
 
 // ── Gender aggregation ──────────────────────────────────────
 const genderMap: Record<string, number> = {};
@@ -190,33 +201,33 @@ featuredMatchups.forEach(m => {
           </div>
         </div>
 
-        <!-- Candidates -->
-        <div class="bg-card border border-border rounded-xl p-5 shadow-sm flex justify-between items-start">
+        <!-- Candidates (clickable → /candidates) -->
+        <a href="/candidates" class="bg-card border border-border rounded-xl p-5 shadow-sm flex justify-between items-start hover:shadow-md hover:border-green-300 transition-all group">
           <div>
             <div class="flex items-center gap-2 mb-1">
               <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Candidates</span>
             </div>
-            <p class="text-3xl font-bold text-foreground">{totalCandidates.toLocaleString()}</p>
-            <p class="text-xs text-muted-foreground mt-1">कुल उम्मेदवार</p>
+            <p class="text-3xl font-bold text-foreground group-hover:text-green-600 transition-colors">{totalCandidates.toLocaleString()}</p>
+            <p class="text-xs text-muted-foreground mt-1">कुल उम्मेदवार • <span class="text-green-600 group-hover:underline">View all →</span></p>
           </div>
           <div class="bg-green-50 border border-green-200 p-3 rounded-xl text-green-600">
             <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
           </div>
-        </div>
+        </a>
 
-        <!-- Seats -->
-        <div class="bg-card border border-border rounded-xl p-5 shadow-sm flex justify-between items-start">
+        <!-- Seats (clickable → /result) -->
+        <a href="/result" class="bg-card border border-border rounded-xl p-5 shadow-sm flex justify-between items-start hover:shadow-md hover:border-purple-300 transition-all group">
           <div>
             <div class="flex items-center gap-2 mb-1">
               <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Seats</span>
             </div>
-            <p class="text-3xl font-bold text-foreground">275</p>
-            <p class="text-xs text-muted-foreground mt-1">प्रतिनिधि सभा सीट</p>
+            <p class="text-3xl font-bold text-foreground group-hover:text-purple-600 transition-colors">275</p>
+            <p class="text-xs text-muted-foreground mt-1">प्रतिनिधि सभा सीट • <span class="text-purple-600 group-hover:underline">View results →</span></p>
           </div>
           <div class="bg-purple-50 border border-purple-200 p-3 rounded-xl text-purple-600">
             <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
           </div>
-        </div>
+        </a>
 
         <!-- Parties -->
         <div class="bg-card border border-border rounded-xl p-5 shadow-sm flex justify-between items-start">
