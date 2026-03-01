@@ -1,4 +1,5 @@
 ---
+export const prerender = false;
 import { createClient } from '@supabase/supabase-js';
 import '../styles/global.css';
 import Header from '../components/Header.astro';
@@ -12,32 +13,21 @@ if (!supabaseUrl || !supabaseKey) {
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const partyColorMap: Record<string, string> = {
-  "नेपाली काँग्रेस": "bg-green-100 text-green-800 border-green-200",
-  "नेपाल कम्युनिष्ट पार्टी (एकीकृत मार्क्सवादी लेनिनवादी)": "bg-red-100 text-red-800 border-red-200",
-  "नेकपा एमाले": "bg-red-100 text-red-800 border-red-200", // Handle abbreviation
-  "नेपाल कम्युनिष्ट पार्टी (माओवादी केन्द्र)": "bg-rose-100 text-rose-800 border-rose-200",
-  "राष्ट्रिय स्वतन्त्र पार्टी": "bg-blue-100 text-blue-800 border-blue-200",
-  "राष्ट्रिय प्रजातन्त्र पार्टी": "bg-purple-100 text-purple-800 border-purple-200",
-  "जनता समाजवादी पार्टी, नेपाल": "bg-green-100 text-green-800 border-green-200",
-  "स्वतन्त्र": "bg-gray-100 text-gray-800 border-gray-200",
-};
-
-// URL params
-const url = new URL(Astro.request.url);
-const selectedProvince = url.searchParams.get('province') || 'all';
-const selectedDistrict = url.searchParams.get('district') || 'all';
-const selectedParty = url.searchParams.get('party') || 'all';
-const selectedGender = url.searchParams.get('gender') || 'all';
-const searchQuery = url.searchParams.get('search') || '';
-const currentPage = Math.max(1, Number(url.searchParams.get('page') || '1'));
+// URL params - use Astro.url for SSR-safe param reading
+const selectedProvince = Astro.url.searchParams.get('province') || 'all';
+const selectedDistrict = Astro.url.searchParams.get('district') || 'all';
+const selectedParty = Astro.url.searchParams.get('party') || 'all';
+const selectedGender = Astro.url.searchParams.get('gender') || 'all';
+const searchQuery = Astro.url.searchParams.get('search') || '';
+const currentPage = Math.max(1, Number(Astro.url.searchParams.get('page') || '1'));
 const pageSize = 20;
 
-// Query with pagination + filter
+// Query with pagination + filter - fetch all available fields
 let query = supabase
   .from('candidates')
-  .select('candidate_id, name, age, gender, party, province, district, qualification', { count: 'exact' })
+  .select('candidate_id, name, age, gender, party, province, district, qualification, address, symbol_name, father_name, spouse_name, other_details', { count: 'exact' })
   .range((currentPage - 1) * pageSize, currentPage * pageSize - 1)
+  .order('district')
   .order('name');
 
 if (searchQuery) {
@@ -66,19 +56,19 @@ const { data: candidates = [], error, count: totalCount = 0 } = await query;
 async function getUniqueValues(column: string) {
   let allVals: string[] = [];
   let page = 0;
-  const pageSize = 1000;
+  const batchSize = 1000;
   while(true) {
     const { data } = await supabase
       .from('candidates')
       .select(column)
       .not(column, 'is', null)
-      .range(page * pageSize, (page + 1) * pageSize - 1);
+      .range(page * batchSize, (page + 1) * batchSize - 1);
       
     if (!data || data.length === 0) break;
     data.forEach(item => {
       if (item[column]) allVals.push(item[column]);
     });
-    if (data.length < pageSize) break;
+    if (data.length < batchSize) break;
     page++;
   }
   return [...new Set(allVals)].sort();
@@ -88,80 +78,39 @@ const uniqueProvinces = await getUniqueValues('province');
 const uniqueDistricts = await getUniqueValues('district');
 const uniqueParties = await getUniqueValues('party');
 
-// We need overall totals for the Statistics Cards. Let's fetch the counts using a very light query.
-let totalCandidatesCount = totalCount;
-let totalUniquePartiesCount = 66; // Hardcoded per user request
-let totalUniqueProvincesCount = 7; // Hardcoded per user request
-// Hardcoded 77 Districts for Nepal as it is a constant, or we could fetch it if there was a district column
-let totalDistrictsCount = 77;
-
-if (selectedProvince !== 'all' || selectedDistrict !== 'all' || selectedParty !== 'all' || selectedGender !== 'all' || searchQuery) {
-  // If we have filters active, the 'totalCount', 'uniqueParties', etc represent the *filtered* view.
-  // The global statistics board at the top of chunab2082 usually shows global absolute numbers.
-  // We'll fetch just a quick count for the overall absolute numbers for the stat cards:
-  const { count: globalCount } = await supabase.from('candidates').select('*', { count: 'exact', head: true });
-  totalCandidatesCount = globalCount || 0;
-  
-  // (Optional optimization: We are caching 'totalUniquePartiesCount' globally from the db anyways, 
-  // since the not(null) queries above aren't affected by the currently applied query filters 
-  // unless we apply them, which we didn't). 
-}
-
-// Prepare Data for Charts (Party Distribution & Qualification)
-// We will aggregate this from the database for the *entire* dataset regardless of filters, 
-// matching how the original dashboard analysis section behaves.
-const { data: allCandidatesForCharts } = await supabase
-  .from('candidates')
-  .select('party, qualification')
-  .limit(10000); // Fetch all to aggregate
-
-const partyCounts: Record<string, number> = {};
-const qualificationCounts: Record<string, number> = {};
-
-if (allCandidatesForCharts) {
-  allCandidatesForCharts.forEach(c => {
-    if (c.party) {
-      partyCounts[c.party] = (partyCounts[c.party] || 0) + 1;
-    }
-    // Handle specific mappings for Qualifications based on original data (sometimes numeric or unstructured)
-    // Using simple mapping based on source code grouping
-    let qual = c.qualification || 'Other';
-    // Clean up obvious synonyms based on screenshots
-    if (qual.includes('Class 10') || qual.includes('S.L.C.') || qual.includes('SEE')) qual = 'SLC / SEE';
-    if (qual.includes('10+2') || qual.includes('Certificate') || qual.includes('Intermediate')) qual = '+2 / Diploma';
-    if (qual.includes('Bachelor')) qual = 'Bachelors';
-    if (qual.includes('Master')) qual = 'Masters';
-    if (qual.includes('Ph.D') || qual.includes('M.Phil')) qual = 'Ph.D / M.Phil';
-    if (qual.includes('Literate')) qual = 'Literate';
-    if (qual.includes('Under S.L.C.')) qual = 'Below SLC';
-    
-    qualificationCounts[qual] = (qualificationCounts[qual] || 0) + 1;
-  });
-}
-
-// Convert objects to arrays for Chart.js sorting
-const partyChartData = Object.entries(partyCounts)
-  .map(([name, value]) => ({ name, value }))
-  .sort((a, b) => b.value - a.value)
-  .slice(0, 10); // Show top 10
-
-const qualChartData = Object.entries(qualificationCounts)
-  .map(([name, value]) => ({ name, value }))
-  .sort((a, b) => b.value - a.value);
-
 // Pagination math
-const totalPages = Math.ceil(totalCount / pageSize);
+const totalPages = Math.ceil((totalCount || 0) / pageSize);
 const hasPrev = currentPage > 1;
 const hasNext = currentPage < totalPages;
+
+function getPartyColor(party: string) {
+  const map: Record<string, string> = {
+    "नेपाली काँग्रेस": "bg-green-100 text-green-800 border-green-200",
+    "नेपाल कम्युनिष्ट पार्टी (एकीकृत मार्क्सवादी लेनिनवादी)": "bg-red-100 text-red-800 border-red-200",
+    "नेकपा एमाले": "bg-red-100 text-red-800 border-red-200",
+    "नेपाल कम्युनिष्ट पार्टी (माओवादी केन्द्र)": "bg-rose-100 text-rose-800 border-rose-200",
+    "राष्ट्रिय स्वतन्त्र पार्टी": "bg-blue-100 text-blue-800 border-blue-200",
+    "राष्ट्रिय प्रजातन्त्र पार्टी": "bg-purple-100 text-purple-800 border-purple-200",
+    "जनता समाजवादी पार्टी, नेपाल": "bg-yellow-100 text-yellow-800 border-yellow-200",
+    "स्वतन्त्र": "bg-gray-100 text-gray-800 border-gray-200",
+  };
+  return map[party] || "bg-secondary text-secondary-foreground border-border";
+}
+
+function abbreviateParty(party: string) {
+  if (party === 'नेपाल कम्युनिष्ट पार्टी (एकीकृत मार्क्सवादी लेनिनवादी)') return 'नेकपा एमाले';
+  if (party === 'नेपाल कम्युनिस्ट पार्टी (माओवादी)') return 'माओवादी केन्द्र';
+  if (party === 'नेपाल कम्युनिष्ट पार्टी (माओवादी केन्द्र)') return 'माओवादी केन्द्र';
+  if (party?.length > 20) return party.substring(0, 18) + '…';
+  return party;
+}
 ---
 
 <html lang="ne">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>नेपाल निर्वाचन उम्मेदवार ड्यासबोर्ड | Nepal Election Dashboard</title>
-    <!-- Chart.js Injection -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <title>उम्मेदवारहरू | Nepal Election 2082 Dashboard</title>
   </head>
 
   <body class="bg-background min-h-screen font-sans antialiased text-foreground">
@@ -171,38 +120,37 @@ const hasNext = currentPage < totalPages;
 
     <main class="container mx-auto px-4 py-8">
       
-      <div class="mb-8">
-        <h1 class="text-3xl md:text-4xl font-bold tracking-tight mb-2 nepali-text text-foreground">
-          उम्मेदवारहरू (Candidates)
+      <div class="mb-6">
+        <h1 class="text-3xl md:text-4xl font-bold tracking-tight mb-2 text-foreground">
+          उम्मेदवारहरू <span class="text-lg font-normal text-muted-foreground ml-1">(Candidates)</span>
         </h1>
-        <p class="text-muted-foreground">
-          जिल्ला, प्रदेश, र पार्टी अनुसार उम्मेदवारहरू खोज्नुहोस् • Explore candidates by district, province, and party
+        <p class="text-muted-foreground text-sm">
+          जिल्ला, प्रदेश, र पार्टी अनुसार उम्मेदवारहरू खोज्नुहोस्
         </p>
       </div>
 
       <!-- Filters Section -->
-      <div class="bg-card border border-border rounded-xl p-5 shadow-sm mb-12">
-        <h3 class="text-sm font-semibold text-foreground/80 mb-3 nepali-text">फिल्टर <span class="text-muted-foreground font-normal">(Filters)</span></h3>
+      <form method="GET" action="/candidates" class="bg-card border border-border rounded-xl p-5 shadow-sm mb-8">
+        <h3 class="text-sm font-semibold text-foreground/80 mb-3">Filters (फिल्टर)</h3>
         
-        <div class="flex flex-col md:flex-row gap-3">
+        <div class="flex flex-col md:flex-row gap-3 flex-wrap">
           <!-- Name Search -->
-          <div class="flex-1">
-             <input 
-               type="text" 
-               id="searchInput" 
-               class="w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm" 
-               placeholder="नाम खोज्नुहोस् (Search Name)..."
-               value={searchQuery}
-               onkeypress="if(event.key === 'Enter') window.updateFilters()"
-             />
+          <div class="flex-1 min-w-[160px]">
+            <input 
+              type="text" 
+              name="search"
+              class="w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-sm" 
+              placeholder="Search name..."
+              value={searchQuery}
+            />
           </div>
 
+          <!-- Province Filter -->
           <select
-            id="provinceSelect"
-            class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm flex-1"
-            onchange="window.updateFilters()"
+            name="province"
+            class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-sm flex-1 min-w-[140px]"
           >
-            <option value="all">प्रदेश (Province)</option>
+            <option value="all">All Provinces</option>
             {uniqueProvinces.map(prov => (
               <option value={prov} selected={selectedProvince === prov}>
                 {prov}
@@ -210,12 +158,12 @@ const hasNext = currentPage < totalPages;
             ))}
           </select>
 
+          <!-- District Filter -->
           <select
-            id="districtSelect"
-            class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm flex-1 md:max-w-xs"
-            onchange="window.updateFilters()"
+            name="district"
+            class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-sm flex-1 min-w-[140px]"
           >
-            <option value="all">जिल्ला (District)</option>
+            <option value="all">All Districts</option>
             {uniqueDistricts.map(dist => (
               <option value={dist} selected={selectedDistrict === dist}>
                 {dist}
@@ -223,179 +171,259 @@ const hasNext = currentPage < totalPages;
             ))}
           </select>
 
+          <!-- Party Filter -->
           <select
-            id="partySelect"
-            class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm flex-1 md:max-w-xs"
-            onchange="window.updateFilters()"
+            name="party"
+            class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-sm flex-1 min-w-[140px]"
           >
-            <option value="all">पार्टी (Party)</option>
+            <option value="all">All Parties</option>
             {uniqueParties.map(party => (
               <option value={party} selected={selectedParty === party}>
-                {party}
+                {abbreviateParty(party)}
               </option>
             ))}
           </select>
 
+          <!-- Gender Filter -->
           <select
-            id="genderSelect"
-            class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm flex-1"
-            onchange="window.updateFilters()"
+            name="gender"
+            class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-sm min-w-[130px]"
           >
-            <option value="all">सबै लिङ्ग (All Genders)</option>
-            <option value="पुरुष" selected={selectedGender === 'पुरुष'}>पुरुष (Male)</option>
-            <option value="महिला" selected={selectedGender === 'महिला'}>महिला (Female)</option>
-            <option value="अन्य" selected={selectedGender === 'अन्य'}>अन्य (Other)</option>
+            <option value="all">All Genders</option>
+            <option value="पुरुष" selected={selectedGender === 'पुरुष'}>Male (पुरुष)</option>
+            <option value="महिला" selected={selectedGender === 'महिला'}>Female (महिला)</option>
+            <option value="अन्य" selected={selectedGender === 'अन्य'}>Other (अन्य)</option>
           </select>
 
-          <button onclick="window.updateFilters()" id="applyFiltersBtn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md shadow transition-colors w-full md:w-auto mt-2 md:mt-0 whitespace-nowrap">
-            खोज्नुहोस् / Apply
+          <button type="submit" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-md shadow transition-colors whitespace-nowrap">
+            Apply Filter
           </button>
+
+          <a href="/candidates" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-md transition-colors whitespace-nowrap flex items-center">
+            Clear
+          </a>
         </div>
-      </div>
+      </form>
 
       {error ? (
         <div class="bg-red-50 border-l-4 border-red-500 p-6 rounded-lg mb-8 text-red-700">
-          <p class="font-medium">डाटा लोड गर्न समस्या / Error loading data:</p>
+          <p class="font-medium">Error loading data:</p>
           <p class="mt-2">{error.message}</p>
         </div>
       ) : (
         <div>
-          <div class="flex justify-between items-center mb-6">
-            <h2 class="text-xl font-bold tracking-tight text-foreground nepali-text">उम्मेदवारहरू <span class="text-sm font-normal text-muted-foreground ml-2">(Candidates)</span></h2>
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-lg font-bold text-foreground">
+              Results <span class="text-sm font-normal text-muted-foreground">({totalCount} candidates)</span>
+            </h2>
             <p class="text-muted-foreground text-sm">
-              Showing {candidates.length} of {totalCount} • Page {currentPage}/{totalPages || 1}
+              Page {currentPage} of {totalPages || 1}
             </p>
           </div>
 
           {candidates.length === 0 ? (
             <div class="text-center py-16 bg-card border border-border rounded-xl text-muted-foreground text-lg shadow-sm mb-10">
-               <svg class="mx-auto h-12 w-12 text-muted-foreground/50 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-               </svg>
-              कुनै उम्मेदवार फेला परेन / No candidates found
+              <svg class="mx-auto h-12 w-12 text-muted-foreground/50 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              No candidates found. <a href="/candidates" class="text-blue-600 underline ml-1">Clear filters</a>
             </div>
           ) : (
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-10">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 mb-8">
               {candidates.map((c) => {
-                const partyColor = partyColorMap[c.party] || "bg-secondary text-secondary-foreground border-border";
+                const partyColor = getPartyColor(c.party);
+                const photoUrl = c.candidate_id 
+                  ? `https://election.gov.np/uploads/candidate/${c.candidate_id}.jpg`
+                  : null;
+                const constituency = c.district || '—';
+                const candidateData = JSON.stringify({
+                  id: c.candidate_id,
+                  name: c.name,
+                  party: c.party,
+                  province: c.province,
+                  district: c.district,
+                  age: c.age,
+                  gender: c.gender,
+                  qualification: c.qualification,
+                  father_name: c.father_name,
+                  spouse_name: c.spouse_name,
+                  address: c.address,
+                  symbol_name: c.symbol_name,
+                  other_details: c.other_details,
+                }).replace(/'/g, "&#39;");
                 return (
-                <div class="candidate-card h-full flex flex-col justify-between">
-                  <div>
-                    <div class="flex items-start gap-3">
-                      <!-- Avatar placeholder -->
-                      <div class="flex h-12 w-12 items-center justify-center rounded-full bg-secondary overflow-hidden shrink-0">
-                        {/* If no image exists from election.gov.np, fallback to initial gracefully. */}
-                        <div class="flex items-center justify-center text-muted-foreground font-bold text-lg w-full h-full">
-                          {c.name.charAt(0)}
-                        </div>
-                      </div>
-
-                      <div class="flex-1 min-w-0">
-                        <!-- Name -->
-                        <h3 class="text-name text-foreground truncate nepali-text">
-                          {c.name}
-                        </h3>
-
-                        <!-- Party Badge -->
-                        <div class="mt-1.5 flex flex-wrap items-center gap-2">
-                          <span class={`badge-party border ${partyColor} nepali-text`}>
-                            {c.party === 'नेपाल कम्युनिष्ट पार्टी (एकीकृत मार्क्सवादी लेनिनवादी)' ? 'नेकपा एमाले' : c.party}
-                          </span>
-                        </div>
+                <div 
+                  class="candidate-card h-full flex flex-col cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+                  onclick={`openModal('${candidateData.replace(/"/g, '&quot;')}')`}
+                >
+                  <div class="flex items-start gap-3">
+                    <!-- Photo -->
+                    <div class="flex h-14 w-14 items-center justify-center rounded-full bg-secondary overflow-hidden shrink-0 border-2 border-border">
+                      {photoUrl ? (
+                        <img 
+                          src={photoUrl}
+                          alt={c.name}
+                          class="w-full h-full object-cover"
+                          onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                        />
+                      ) : null}
+                      <div class="flex items-center justify-center text-muted-foreground font-bold text-lg w-full h-full" style={photoUrl ? "display:none" : ""}>
+                        {c.name?.charAt(0) || '?'}
                       </div>
                     </div>
 
-                    <!-- Details Grid -->
-                    <div class="mt-4 grid grid-cols-2 gap-2 text-sm">
-                      <div class="flex items-center gap-1.5 text-muted-foreground mr-2 col-span-2">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 shrink-0"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-                        <span class="truncate">{c.district ? `${c.district} - क्षेत्र १` : c.province}</span>
-                      </div>
-                      <div class="flex items-center gap-1.5 text-muted-foreground">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 shrink-0"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
-                        <span>{c.age} वर्ष</span>
-                      </div>
-                      <div class="flex items-center gap-1.5 text-muted-foreground">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 shrink-0"><path d="m4 6 8-4 8 4"/><path d="m18 10 4 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8l4-2"/><path d="M14 22v-4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v4"/><path d="M18 5v17"/><path d="M6 5v17"/><circle cx="12" cy="9" r="2"/></svg>
-                        <span class="truncate">{c.qualification || 'N/A'}</span>
+                    <div class="flex-1 min-w-0">
+                      <!-- Name -->
+                      <h3 class="font-semibold text-foreground text-sm leading-tight nepali-text line-clamp-2">
+                        {c.name}
+                      </h3>
+                      <!-- Party Badge -->
+                      <div class="mt-1.5">
+                        <span class={`badge-party border ${partyColor} nepali-text text-xs`}>
+                          {abbreviateParty(c.party)}
+                        </span>
                       </div>
                     </div>
                   </div>
-                  
-                  <div class="mt-4 pt-3 border-t border-border flex justify-end">
-                    <span class="text-xs text-muted-foreground border border-border px-2 py-1 rounded">{c.gender}</span>
+
+                  <!-- Details -->
+                  <div class="mt-3 space-y-1.5 text-xs text-muted-foreground">
+                    <div class="flex items-center gap-1.5">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 shrink-0 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                      <span class="truncate font-medium text-foreground/80">{constituency}</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-1.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
+                        <span>{c.age} yrs</span>
+                      </div>
+                      <div class="flex items-center gap-1.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="m4 6 8-4 8 4"/><path d="m18 10 4 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8l4-2"/><circle cx="12" cy="9" r="2"/></svg>
+                        <span class="truncate max-w-[80px]">{c.qualification || '—'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="mt-3 pt-2 border-t border-border flex justify-between items-center">
+                    <span class="text-xs text-muted-foreground">{c.gender}</span>
+                    <span class="text-xs text-blue-500 font-medium">View Details →</span>
                   </div>
                 </div>
-              )})}
+              )})
+              }
             </div>
           )}
 
           <!-- Pagination -->
-          <div class="flex justify-center items-center gap-4 py-8">
-            <button
-              onclick={`window.location.href = '?province=${encodeURIComponent(selectedProvince)}&district=${encodeURIComponent(selectedDistrict)}&party=${encodeURIComponent(selectedParty)}&gender=${encodeURIComponent(selectedGender)}&search=${encodeURIComponent(searchQuery)}&page=${currentPage - 1}'`}
-              disabled={!hasPrev}
-              class="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 rounded-md px-3"
-            >
-              &larr; Previous 
-            </button>
+          <div class="flex justify-center items-center gap-3 py-6">
+            {hasPrev && (
+              <a 
+                href={`/candidates?province=${encodeURIComponent(selectedProvince)}&district=${encodeURIComponent(selectedDistrict)}&party=${encodeURIComponent(selectedParty)}&gender=${encodeURIComponent(selectedGender)}&search=${encodeURIComponent(searchQuery)}&page=${currentPage - 1}`}
+                class="inline-flex items-center px-4 py-2 text-sm font-medium border border-input bg-background hover:bg-accent rounded-md transition-colors"
+              >
+                ← Previous
+              </a>
+            )}
 
             <span class="text-sm font-medium text-foreground bg-secondary px-4 py-1.5 rounded-md">
               {currentPage} / {totalPages || 1}
             </span>
 
-            <button
-              onclick={`window.location.href = '?province=${encodeURIComponent(selectedProvince)}&district=${encodeURIComponent(selectedDistrict)}&party=${encodeURIComponent(selectedParty)}&gender=${encodeURIComponent(selectedGender)}&search=${encodeURIComponent(searchQuery)}&page=${currentPage + 1}'`}
-              disabled={!hasNext}
-              class="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 rounded-md px-3"
-            >
-              Next &rarr;
-            </button>
+            {hasNext && (
+              <a 
+                href={`/candidates?province=${encodeURIComponent(selectedProvince)}&district=${encodeURIComponent(selectedDistrict)}&party=${encodeURIComponent(selectedParty)}&gender=${encodeURIComponent(selectedGender)}&search=${encodeURIComponent(searchQuery)}&page=${currentPage + 1}`}
+                class="inline-flex items-center px-4 py-2 text-sm font-medium border border-input bg-background hover:bg-accent rounded-md transition-colors"
+              >
+                Next →
+              </a>
+            )}
           </div>
         </div>
       )}
+    </main>
 
-      <script is:inline>
-        // Define function strictly on window so HTML onclick hooks can find it
-        window.updateFilters = function() {
-          var provinceInput = document.getElementById('provinceSelect');
-          var districtInput = document.getElementById('districtSelect');
-          var partyInput = document.getElementById('partySelect');
-          var genderInput = document.getElementById('genderSelect');
-          var searchInput = document.getElementById('searchInput');
+    <!-- Candidate Detail Modal -->
+    <div id="candidateModal" class="fixed inset-0 z-50 hidden" onclick="if(event.target===this) closeModal()">
+      <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"></div>
+      <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto relative">
           
-          if (!provinceInput || !districtInput || !partyInput || !genderInput || !searchInput) return;
+          <!-- Close Button -->
+          <button onclick="closeModal()" class="absolute top-4 right-4 z-10 p-2 rounded-full bg-secondary hover:bg-secondary/80 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
 
-          var province = provinceInput.value;
-          var district = districtInput.value;
-          var party = partyInput.value;
-          var gender = genderInput.value;
-          var search = searchInput.value;
+          <!-- Modal Content -->
+          <div id="modalContent" class="p-6">
+            <!-- Dynamically filled by JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script is:inline>
+      window.openModal = function(dataStr) {
+        try {
+          var c = JSON.parse(dataStr);
+          var photoUrl = c.id ? 'https://election.gov.np/uploads/candidate/' + c.id + '.jpg' : null;
+          var constituency = c.constituency ? c.district + ' - क्षेत्र ' + c.constituency : (c.district || '—');
           
-          var url = new URL(window.location.href);
-          var searchParams = url.searchParams;
+          var html = '<div class="flex items-start gap-4 mb-6">';
+          html += '<div class="h-20 w-20 rounded-full bg-secondary overflow-hidden shrink-0 border-2 border-border">';
+          if (photoUrl) {
+            html += '<img src="' + photoUrl + '" alt="' + c.name + '" class="w-full h-full object-cover" onerror="this.style.display=\'none\'; this.nextSibling.style.display=\'flex\';">';
+          }
+          html += '<div class="w-full h-full flex items-center justify-center text-2xl font-bold text-muted-foreground"' + (photoUrl ? ' style="display:none"' : '') + '>' + (c.name ? c.name.charAt(0) : '?') + '</div>';
+          html += '</div>';
+          html += '<div class="flex-1 min-w-0">';
+          html += '<h2 class="text-xl font-bold text-foreground nepali-text leading-tight">' + (c.name || '—') + '</h2>';
+          html += '<p class="text-sm text-muted-foreground mt-1 nepali-text">' + (c.party || '—') + '</p>';
+          html += '<div class="mt-2 inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded-full border border-blue-200">';
+          html += '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>';
+          html += constituency + '</div>';
+          html += '</div></div>';
 
-          // Reset page to 1 when filters change
-          searchParams.delete('page');
+          // Info grid
+          var rows = [
+            ['Province', c.province],
+            ['District', c.district],
+            ['Age', c.age ? c.age + ' years' : null],
+            ['Gender', c.gender],
+            ['Education', c.qualification],
+            ['Symbol', c.symbol_name],
+            ["Father's Name", c.father_name],
+            ["Spouse's Name", c.spouse_name],
+            ['Address', c.address],
+            ['Other Info', c.other_details],
+          ];
 
-          if (province !== 'all') searchParams.set('province', province);
-          else searchParams.delete('province');
+          html += '<div class="border border-border rounded-xl overflow-hidden">';
+          rows.forEach(function(row, i) {
+            if (row[1] && row[1] !== '0' && row[1] !== '-') {
+              html += '<div class="flex gap-3 px-4 py-3 ' + (i % 2 === 0 ? 'bg-secondary/40' : '') + '">';
+              html += '<span class="text-xs font-semibold text-muted-foreground w-32 shrink-0 pt-0.5">' + row[0] + '</span>';
+              html += '<span class="text-sm text-foreground nepali-text flex-1">' + row[1] + '</span>';
+              html += '</div>';
+            }
+          });
+          html += '</div>';
 
-          if (district !== 'all') searchParams.set('district', district);
-          else searchParams.delete('district');
+          document.getElementById('modalContent').innerHTML = html;
+          document.getElementById('candidateModal').classList.remove('hidden');
+          document.body.style.overflow = 'hidden';
+        } catch(e) {
+          console.error('Modal error:', e);
+        }
+      };
 
-          if (party !== 'all') searchParams.set('party', party);
-          else searchParams.delete('party');
-          
-          if (gender !== 'all') searchParams.set('gender', gender);
-          else searchParams.delete('gender');
-          
-          if (search) searchParams.set('search', search);
-          else searchParams.delete('search');
+      window.closeModal = function() {
+        document.getElementById('candidateModal').classList.add('hidden');
+        document.body.style.overflow = '';
+      };
 
-          // Force page reload with new params
-          window.location.assign(url.toString());
-        };
-      </script>
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') window.closeModal();
+      });
+    </script>
   </body>
 </html>
