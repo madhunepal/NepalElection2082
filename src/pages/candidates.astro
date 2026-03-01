@@ -193,15 +193,12 @@ const hasNext = currentPage < totalPages;
                class="w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm" 
                placeholder="नाम खोज्नुहोस् (Search Name)..."
                value={searchQuery}
-               onkeypress="if(event.key === 'Enter') updateFilters()"
              />
           </div>
 
-          <!-- Province Filter -->
           <select
             id="provinceSelect"
             class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm flex-1"
-            onchange="updateFilters()"
           >
             <option value="all">प्रदेश (Province)</option>
             {uniqueProvinces.map(prov => (
@@ -211,11 +208,9 @@ const hasNext = currentPage < totalPages;
             ))}
           </select>
 
-          <!-- District Filter -->
           <select
             id="districtSelect"
             class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm flex-1 md:max-w-xs"
-            onchange="updateFilters()"
           >
             <option value="all">जिल्ला (District)</option>
             {uniqueDistricts.map(dist => (
@@ -225,11 +220,9 @@ const hasNext = currentPage < totalPages;
             ))}
           </select>
 
-          <!-- Party Filter -->
           <select
             id="partySelect"
             class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm flex-1 md:max-w-xs"
-            onchange="updateFilters()"
           >
             <option value="all">पार्टी (Party)</option>
             {uniqueParties.map(party => (
@@ -239,11 +232,9 @@ const hasNext = currentPage < totalPages;
             ))}
           </select>
 
-          <!-- Gender Filter -->
           <select
             id="genderSelect"
             class="px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring bg-background text-sm flex-1"
-            onchange="updateFilters()"
           >
             <option value="all">सबै लिङ्ग (All Genders)</option>
             <option value="पुरुष" selected={selectedGender === 'पुरुष'}>पुरुष (Male)</option>
@@ -421,8 +412,8 @@ const hasNext = currentPage < totalPages;
           }
         }
 
-        // Run when DOM is ready (works for initial load)
-        document.addEventListener('DOMContentLoaded', initFilters);
+        // Execute immediately (Astro module scripts are deferred automatically)
+        initFilters();
       </script>
   </body>
 </html>
