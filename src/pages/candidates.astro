@@ -7,72 +7,90 @@ import Header from '../components/Header.astro';
 const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || process.env.PUBLIC_SUPABASE_URL;
 const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || process.env.PUBLIC_SUPABASE_ANON_KEY;
 if (!supabaseUrl || !supabaseKey) throw new Error('Missing Supabase credentials');
-
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// URL params
-const selectedProvince    = Astro.url.searchParams.get('province')    || 'all';
-const selectedDistrict    = Astro.url.searchParams.get('district')    || 'all';
-const selectedConstituency = Astro.url.searchParams.get('area')       || 'all';
-const selectedParty       = Astro.url.searchParams.get('party')       || 'all';
-const selectedGender      = Astro.url.searchParams.get('gender')      || 'all';
-const searchQuery         = Astro.url.searchParams.get('search')      || '';
-const currentPage         = Math.max(1, Number(Astro.url.searchParams.get('page') || '1'));
+// ── URL params ──────────────────────────────────────────────
+const selectedProvince     = Astro.url.searchParams.get('province') || 'all';
+const selectedDistrict     = Astro.url.searchParams.get('district') || 'all';
+const selectedConstituency = Astro.url.searchParams.get('area')     || 'all';
+const selectedParty        = Astro.url.searchParams.get('party')    || 'all';
+const selectedGender       = Astro.url.searchParams.get('gender')   || 'all';
+const searchQuery          = Astro.url.searchParams.get('search')   || '';
+const currentPage          = Math.max(1, Number(Astro.url.searchParams.get('page') || '1'));
 const pageSize = 24;
 
-// Build main query
+// ── Build main query ────────────────────────────────────────
 let query = supabase
   .from('candidates')
-  .select('candidate_id, name, age, gender, party, province, district, constituency, qualification, address, symbol_name, father_name, spouse_name, other_details', { count: 'exact' })
+  .select('candidate_id,name,age,gender,party,province,district,constituency,qualification,address,symbol_name,father_name,spouse_name,other_details', { count: 'exact' })
   .range((currentPage - 1) * pageSize, currentPage * pageSize - 1)
   .order('district').order('constituency').order('name');
 
-if (searchQuery)                     query = query.ilike('name', `%${searchQuery}%`);
-if (selectedGender      !== 'all')   query = query.eq('gender',       selectedGender);
-if (selectedProvince    !== 'all')   query = query.eq('province',     selectedProvince);
-if (selectedDistrict    !== 'all')   query = query.eq('district',     selectedDistrict);
-if (selectedConstituency !== 'all')  query = query.eq('constituency', Number(selectedConstituency));
-if (selectedParty       !== 'all')   query = query.eq('party',        selectedParty);
+if (searchQuery)                      query = query.ilike('name', `%${searchQuery}%`);
+if (selectedGender      !== 'all')    query = query.eq('gender',       selectedGender);
+if (selectedProvince    !== 'all')    query = query.eq('province',     selectedProvince);
+if (selectedDistrict    !== 'all')    query = query.eq('district',     selectedDistrict);
+if (selectedConstituency !== 'all')   query = query.eq('constituency', Number(selectedConstituency));
+if (selectedParty       !== 'all')    query = query.eq('party',        selectedParty);
 
-// Helper: fetch all unique values of a column (handles >1000 rows)
-async function getUnique(col: string, extraFilters?: Record<string,string>) {
-  let vals: (string|number)[] = [];
-  let p = 0;
+// ── Fetch filter data in parallel ───────────────────────────
+async function getAllUnique(col: string) {
+  let vals: string[] = []; let p = 0;
   while (true) {
-    let q = supabase.from('candidates').select(col).not(col,'is',null).range(p*1000,(p+1)*1000-1);
-    if (extraFilters) {
-      for (const [k,v] of Object.entries(extraFilters)) q = (q as any).eq(k, v === 'all' ? undefined : v);
-    }
-    const { data } = await q;
-    if (!data || data.length === 0) break;
-    data.forEach((r: any) => { if (r[col] !== null && r[col] !== undefined) vals.push(r[col]); });
-    if (data.length < 1000) break;
-    p++;
+    const { data } = await supabase.from('candidates').select(col).not(col,'is',null).range(p*1000,(p+1)*1000-1);
+    if (!data || !data.length) break;
+    data.forEach((r: any) => { if (r[col]) vals.push(r[col]); });
+    if (data.length < 1000) break; p++;
   }
-  return [...new Set(vals)].sort((a: any, b: any) => {
-    if (typeof a === 'number' && typeof b === 'number') return a - b;
-    return String(a).localeCompare(String(b), 'ne');
-  });
+  return [...new Set(vals)].sort();
 }
 
-// Run main query + all filter lookups IN PARALLEL for speed
+// Build cascading location map from all candidates (one query, all rows)
+async function buildLocationMap() {
+  const map: Record<string, Record<string, Set<number>>> = {};
+  let p = 0;
+  while (true) {
+    const { data } = await supabase.from('candidates').select('province,district,constituency').range(p*1000,(p+1)*1000-1);
+    if (!data || !data.length) break;
+    data.forEach((r: any) => {
+      if (!r.province || !r.district) return;
+      if (!map[r.province]) map[r.province] = {};
+      if (!map[r.province][r.district]) map[r.province][r.district] = new Set();
+      if (r.constituency) map[r.province][r.district].add(Number(r.constituency));
+    });
+    if (data.length < 1000) break; p++;
+  }
+  // Serialize: { province: { district: [1,2,3] } }
+  const out: Record<string, Record<string, number[]>> = {};
+  for (const prov in map) {
+    out[prov] = {};
+    for (const dist in map[prov]) {
+      out[prov][dist] = [...map[prov][dist]].sort((a,b) => a-b);
+    }
+  }
+  return out;
+}
+
 const [
   { data: candidates = [], error, count: totalCount = 0 },
-  uniqueProvinces,
-  uniqueDistricts,
   uniqueParties,
-  uniqueConstituencies,
-] = await Promise.all([
-  query,
-  getUnique('province'),
-  getUnique('district'),
-  getUnique('party'),
-  // Get constituency options scoped to selected district if one is chosen
-  getUnique('constituency', selectedDistrict !== 'all' ? { district: selectedDistrict } : undefined),
-]);
+  locationMap,
+] = await Promise.all([query, getAllUnique('party'), buildLocationMap()]);
 
 const totalPages = Math.ceil((totalCount || 0) / pageSize);
 
+// Derive filter dropdown options from locationMap
+const uniqueProvinces = Object.keys(locationMap).sort();
+const uniqueDistricts = selectedProvince !== 'all'
+  ? Object.keys(locationMap[selectedProvince] || {}).sort()
+  : Object.values(locationMap).flatMap(dmap => Object.keys(dmap)).filter((v,i,a) => a.indexOf(v)===i).sort();
+const uniqueAreas = selectedDistrict !== 'all'
+  ? (locationMap[selectedProvince]?.[selectedDistrict] ?? [])
+  : selectedProvince !== 'all'
+    ? Object.values(locationMap[selectedProvince] || {}).flat().filter((v,i,a) => a.indexOf(v)===i).sort((a,b) => a-b)
+    : [];
+
+// ── Helpers ─────────────────────────────────────────────────
 function partyColor(party: string) {
   const m: Record<string,string> = {
     "नेपाली काँग्रेस": "bg-green-100 text-green-800 border-green-200",
@@ -93,24 +111,21 @@ function shortParty(p: string) {
   if (p.includes('एकीकृत मार्क्सवादी')) return 'नेकपा एमाले';
   if (p.includes('माओवादी')) return 'माओवादी केन्द्र';
   if (p.includes('काँग्रेस')) return 'नेपाली काँग्रेस';
-  if (p.includes('स्वतन्त्र पार्टी')) return 'राष्ट्रिय स्वतन्त्र';
+  if (p.includes('स्वतन्त्र पार्टी')) return 'रा.स्व.पार्टी';
   if (p.includes('प्रजातन्त्र पार्टी')) return 'राप्रपा';
   return p.length > 20 ? p.slice(0, 18) + '…' : p;
 }
 
 function encodeCandidate(c: any): string {
-  const obj = {
+  return Buffer.from(JSON.stringify({
     id: c.candidate_id, name: c.name, party: c.party,
     province: c.province, district: c.district, constituency: c.constituency,
     age: c.age, gender: c.gender, qualification: c.qualification,
     symbol_name: c.symbol_name, father_name: c.father_name,
-    spouse_name: c.spouse_name, address: c.address,
-    other_details: c.other_details,
-  };
-  return Buffer.from(JSON.stringify(obj)).toString('base64');
+    spouse_name: c.spouse_name, address: c.address, other_details: c.other_details,
+  })).toString('base64');
 }
 
-// Build pagination URL helper
 function pageUrl(p: number) {
   const params = new URLSearchParams();
   if (searchQuery)                      params.set('search',   searchQuery);
@@ -135,228 +150,285 @@ function pageUrl(p: number) {
 
     <main class="container mx-auto px-4 py-8">
 
-      <!-- Heading -->
       <div class="mb-6">
         <h1 class="text-3xl md:text-4xl font-bold tracking-tight mb-1">
-          उम्मेदवारहरू
-          <span class="text-lg font-normal text-muted-foreground ml-1">(Candidates)</span>
+          उम्मेदवारहरू <span class="text-lg font-normal text-muted-foreground ml-1">(Candidates)</span>
         </h1>
         <p class="text-muted-foreground text-sm">जिल्ला, प्रदेश, र पार्टी अनुसार उम्मेदवारहरू खोज्नुहोस्</p>
       </div>
 
-      <!-- ── FILTERS (native HTML form — 100% SSR reliable) ── -->
-      <form method="GET" action="/candidates" class="bg-card border border-border rounded-xl p-5 shadow-sm mb-8">
-        <p class="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wide">Filters</p>
+      <!-- ── FILTER FORM ── -->
+      <form id="filterForm" method="GET" action="/candidates" class="bg-card border border-border rounded-xl p-5 shadow-sm mb-8">
+        <div class="flex items-center justify-between mb-3">
+          <p class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Filters</p>
+          <span id="filterSpinner" class="hidden text-xs text-blue-500 animate-pulse">⟳ Loading…</span>
+        </div>
         <div class="flex flex-wrap gap-2">
 
-          <!-- Search -->
-          <input type="text" name="search"
-            class="border border-input rounded-md px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-blue-500 outline-none flex-1 min-w-[180px]"
-            placeholder="Search candidate name…" value={searchQuery} />
+          <!-- Search by name (partial, Nepali) -->
+          <div class="flex-1 min-w-[200px] relative">
+            <input type="text" id="searchInput" name="search"
+              class="w-full border border-input rounded-md px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-blue-500 outline-none pr-10"
+              placeholder="🔍 Search name (नाम खोज्नुहोस्)…" value={searchQuery}
+              autocomplete="off"
+            />
+            {searchQuery && (
+              <button type="button" onclick="clearSearch()"
+                class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">✕</button>
+            )}
+          </div>
 
-          <!-- Province -->
-          <select name="province" class="border border-input rounded-md px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-blue-500 outline-none flex-1 min-w-[150px]">
+          <!-- Province → auto-submits + cascades district/area -->
+          <select id="provinceSelect" name="province"
+            class="border border-input rounded-md px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-blue-500 outline-none flex-1 min-w-[150px]">
             <option value="all">All Provinces</option>
             {uniqueProvinces.map(p => <option value={p} selected={selectedProvince === p}>{p}</option>)}
           </select>
 
-          <!-- District -->
-          <select name="district" class="border border-input rounded-md px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-blue-500 outline-none flex-1 min-w-[140px]">
+          <!-- District → populated by province cascade -->
+          <select id="districtSelect" name="district"
+            class="border border-input rounded-md px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-blue-500 outline-none flex-1 min-w-[140px]">
             <option value="all">All Districts</option>
             {uniqueDistricts.map(d => <option value={d} selected={selectedDistrict === d}>{d}</option>)}
           </select>
 
-          <!-- Area / Constituency — populated from DB (scoped to district if one selected) -->
-          <select name="area" class="border border-input rounded-md px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-blue-500 outline-none min-w-[130px]">
+          <!-- Area → populated by district cascade -->
+          <select id="areaSelect" name="area"
+            class="border border-input rounded-md px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-blue-500 outline-none min-w-[120px]">
             <option value="all">All Areas</option>
-            {uniqueConstituencies.map(a => (
-              <option value={String(a)} selected={selectedConstituency === String(a)}>
-                क्षेत्र {a}
-              </option>
+            {uniqueAreas.map(a => (
+              <option value={String(a)} selected={selectedConstituency === String(a)}>क्षेत्र {a}</option>
             ))}
           </select>
 
           <!-- Party -->
-          <select name="party" class="border border-input rounded-md px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-blue-500 outline-none flex-1 min-w-[150px]">
+          <select id="partySelect" name="party"
+            class="border border-input rounded-md px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-blue-500 outline-none flex-1 min-w-[150px]">
             <option value="all">All Parties</option>
             {uniqueParties.map(p => <option value={p} selected={selectedParty === p}>{shortParty(String(p))}</option>)}
           </select>
 
           <!-- Gender -->
-          <select name="gender" class="border border-input rounded-md px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-blue-500 outline-none min-w-[120px]">
+          <select id="genderSelect" name="gender"
+            class="border border-input rounded-md px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-blue-500 outline-none min-w-[115px]">
             <option value="all">All Genders</option>
-            <option value="पुरुष"  selected={selectedGender === 'पुरुष'}>Male (पुरुष)</option>
-            <option value="महिला" selected={selectedGender === 'महिला'}>Female (महिला)</option>
+            <option value="पुरुष"  selected={selectedGender === 'पुरुष'}>Male</option>
+            <option value="महिला" selected={selectedGender === 'महिला'}>Female</option>
           </select>
 
-          <button type="submit" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-md shadow transition-colors">
-            Apply
-          </button>
-          <a href="/candidates" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-md transition-colors flex items-center">
-            Clear
-          </a>
+          <!-- Apply (also triggered by onchange on selects) -->
+          <button type="submit" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-md shadow transition-colors">Apply</button>
+          <a href="/candidates" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-md transition-colors flex items-center">Clear</a>
         </div>
       </form>
 
       {error && (
-        <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded mb-6 text-red-700 text-sm">
-          Error: {error.message}
-        </div>
+        <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded mb-6 text-red-700 text-sm">Error: {error.message}</div>
       )}
 
-      <!-- Results count -->
       {!error && (
-        <div class="flex justify-between items-center mb-4">
-          <p class="text-sm text-muted-foreground">
-            Showing <strong class="text-foreground">{candidates.length}</strong> of <strong class="text-foreground">{totalCount}</strong> candidates
-            {searchQuery        && <span> matching "<em>{searchQuery}</em>"</span>}
-            {selectedDistrict !== 'all' && <span class="mx-1">·</span>}
-            {selectedDistrict !== 'all' && <span>{selectedDistrict}</span>}
-            {selectedConstituency !== 'all' && <span> क्षेत्र {selectedConstituency}</span>}
-          </p>
-          <span class="text-sm text-muted-foreground">Page {currentPage} / {totalPages || 1}</span>
-        </div>
-      )}
+        <div>
+          <div class="flex justify-between items-center mb-4">
+            <p class="text-sm text-muted-foreground">
+              <strong class="text-foreground">{totalCount}</strong> candidates
+              {searchQuery && <span class="ml-1">matching "<em>{searchQuery}</em>"</span>}
+              {selectedDistinct !== 'all' && <span class="ml-1">· {selectedDistrict}</span>}
+              {selectedConstituency !== 'all' && <span> क्षेत्र {selectedConstituency}</span>}
+            </p>
+            <span class="text-sm text-muted-foreground">Page {currentPage}/{totalPages || 1}</span>
+          </div>
 
-      <!-- Empty state -->
-      {!error && candidates.length === 0 && (
-        <div class="text-center py-20 bg-card border border-border rounded-xl text-muted-foreground">
-          <svg class="mx-auto h-12 w-12 mb-4 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-          </svg>
-          <p class="text-lg font-medium">No candidates found.</p>
-          <a href="/candidates" class="text-blue-600 underline text-sm mt-2 inline-block">Clear all filters</a>
-        </div>
-      )}
+          {candidates.length === 0 ? (
+            <div class="text-center py-20 bg-card border border-border rounded-xl text-muted-foreground">
+              <p class="text-lg font-medium mb-2">No candidates found.</p>
+              <a href="/candidates" class="text-blue-600 underline text-sm">Clear all filters</a>
+            </div>
+          ) : (
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-8">
+              {candidates.map(c => {
+                const color = partyColor(c.party);
+                const areaLabel = c.constituency ? `${c.district} - क्षेत्र ${c.constituency}` : (c.district || '—');
+                const encoded = encodeCandidate(c);
+                const photoUrl = `https://election.gov.np/2082/uploads/images/candidates/${c.candidate_id}.jpg`;
+                return (
+                  <div class="candidate-card flex flex-col cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group"
+                    data-enc={encoded} onclick="openCandidateModal(this)">
 
-      <!-- ── CANDIDATE GRID ── -->
-      {!error && candidates.length > 0 && (
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-8">
-          {candidates.map(c => {
-            const color = partyColor(c.party);
-            const areaLabel = c.constituency ? `${c.district} - क्षेत्र ${c.constituency}` : (c.district || '—');
-            const encoded = encodeCandidate(c);
-            const photoUrl = `https://election.gov.np/2082/uploads/images/candidates/${c.candidate_id}.jpg`;
-            return (
-              <div
-                class="candidate-card flex flex-col cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group"
-                data-enc={encoded}
-                onclick="openCandidateModal(this)"
-              >
-                <!-- Header row: photo + name + party badge -->
-                <div class="flex items-start gap-3">
-                  <!-- Photo circle -->
-                  <div class="relative h-14 w-14 rounded-full bg-slate-100 overflow-hidden shrink-0 border-2 border-slate-200 group-hover:border-blue-300 transition-colors">
-                    <div class="photo-fallback absolute inset-0 flex items-center justify-center text-slate-500 font-bold text-xl select-none">
-                      {c.name?.charAt(0) || '?'}
+                    <div class="flex items-start gap-3">
+                      <div class="relative h-14 w-14 rounded-full bg-slate-100 overflow-hidden shrink-0 border-2 border-slate-200 group-hover:border-blue-300 transition-colors">
+                        <div class="photo-fallback absolute inset-0 flex items-center justify-center text-slate-500 font-bold text-xl select-none">
+                          {c.name?.charAt(0) || '?'}
+                        </div>
+                        <img src={photoUrl} alt={c.name}
+                          class="candidate-photo absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-300" loading="lazy" />
+                      </div>
+                      <div class="flex-1 min-w-0">
+                        <h3 class="font-semibold text-foreground text-sm leading-snug line-clamp-2">{c.name}</h3>
+                        <span class={`inline-block mt-1 text-xs px-2 py-0.5 rounded-full border font-medium ${color}`}>
+                          {shortParty(c.party)}
+                        </span>
+                      </div>
                     </div>
-                    <img
-                      src={photoUrl}
-                      alt={c.name}
-                      class="candidate-photo absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-300"
-                      loading="lazy"
-                    />
-                  </div>
 
-                  <div class="flex-1 min-w-0">
-                    <h3 class="font-semibold text-foreground text-sm leading-snug line-clamp-2">{c.name}</h3>
-                    <span class={`inline-block mt-1 text-xs px-2 py-0.5 rounded-full border font-medium ${color}`}>
-                      {shortParty(c.party)}
-                    </span>
-                  </div>
-                </div>
+                    {c.symbol_name && (
+                      <div class="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
+                        <span>⚑</span><span class="truncate">{c.symbol_name}</span>
+                      </div>
+                    )}
 
-                <!-- Symbol name -->
-                {c.symbol_name && (
-                  <div class="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
-                    <span class="text-amber-500">⚑</span>
-                    <span class="truncate">{c.symbol_name}</span>
-                  </div>
-                )}
-
-                <!-- Info rows -->
-                <div class="mt-2.5 space-y-1.5 text-xs text-muted-foreground flex-1">
-                  <!-- Location -->
-                  <div class="flex items-center gap-1.5 font-medium text-blue-600">
-                    <svg class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>
-                    </svg>
-                    <span class="truncate">{areaLabel}</span>
-                  </div>
-                  <!-- Age + Education -->
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-1">
-                      <svg class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <rect width="18" height="18" x="3" y="4" rx="2"/><line x1="3" x2="21" y1="10" y2="10"/>
-                      </svg>
-                      <span>{c.age} yrs</span>
+                    <div class="mt-2.5 space-y-1.5 text-xs text-muted-foreground flex-1">
+                      <div class="flex items-center gap-1.5 font-medium text-blue-600">
+                        <svg class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>
+                        </svg>
+                        <span class="truncate">{areaLabel}</span>
+                      </div>
+                      <div class="flex items-center justify-between">
+                        <span>{c.age} yrs · {c.gender}</span>
+                        <span class="truncate max-w-[55%] text-right">{c.qualification || '—'}</span>
+                      </div>
                     </div>
-                    <div class="flex items-center gap-1 max-w-[55%]">
-                      <svg class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path d="m4 6 8-4 8 4"/><path d="m18 10 4 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8l4-2"/><circle cx="12" cy="9" r="2"/>
-                      </svg>
-                      <span class="truncate">{c.qualification || '—'}</span>
+
+                    <div class="mt-3 pt-2 border-t border-border flex justify-end">
+                      <span class="text-xs text-blue-500 font-semibold group-hover:text-blue-700 transition-colors">View Details →</span>
                     </div>
                   </div>
-                </div>
-
-                <!-- Footer -->
-                <div class="mt-3 pt-2 border-t border-border flex justify-between items-center">
-                  <span class="text-xs text-muted-foreground">{c.gender}</span>
-                  <span class="text-xs text-blue-500 font-semibold group-hover:text-blue-700 transition-colors">View Details →</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <!-- Pagination -->
-      {!error && totalPages > 1 && (
-        <div class="flex justify-center items-center gap-3 py-6">
-          {currentPage > 1 && (
-            <a href={pageUrl(currentPage - 1)} class="px-4 py-2 text-sm font-medium border border-input bg-background hover:bg-accent rounded-md transition-colors">← Prev</a>
+                );
+              })}
+            </div>
           )}
-          <span class="text-sm font-medium bg-secondary px-4 py-1.5 rounded-md">{currentPage} / {totalPages}</span>
-          {currentPage < totalPages && (
-            <a href={pageUrl(currentPage + 1)} class="px-4 py-2 text-sm font-medium border border-input bg-background hover:bg-accent rounded-md transition-colors">Next →</a>
+
+          {totalPages > 1 && (
+            <div class="flex justify-center items-center gap-3 py-6">
+              {currentPage > 1 && <a href={pageUrl(currentPage - 1)} class="px-4 py-2 text-sm font-medium border border-input bg-background hover:bg-accent rounded-md transition-colors">← Prev</a>}
+              <span class="text-sm font-medium bg-secondary px-4 py-1.5 rounded-md">{currentPage} / {totalPages}</span>
+              {currentPage < totalPages && <a href={pageUrl(currentPage + 1)} class="px-4 py-2 text-sm font-medium border border-input bg-background hover:bg-accent rounded-md transition-colors">Next →</a>}
+            </div>
           )}
         </div>
       )}
-
     </main>
 
-    <!-- ── DETAIL MODAL ── -->
+    <!-- ── MODAL ── -->
     <div id="candidateModal" class="fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
       <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeCandidateModal()"></div>
       <div class="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto z-10">
-        <button onclick="closeCandidateModal()"
-          class="absolute top-3 right-3 p-2 rounded-full bg-secondary hover:bg-red-100 hover:text-red-600 transition-colors z-20">
-          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
+        <button onclick="closeCandidateModal()" class="absolute top-3 right-3 p-2 rounded-full bg-secondary hover:bg-red-100 hover:text-red-600 transition-colors z-20">
+          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
         <div id="modalBody" class="p-6 pt-5"></div>
       </div>
     </div>
 
-    <script is:inline>
-      // Photo lazy-load: show image when loaded, hide fallback
+    <!-- Embed location map for client-side cascade -->
+    <script is:inline define:vars={{ locationMapJSON: JSON.stringify(locationMap), selectedProvince, selectedDistrict, selectedConstituency }}>
+      var LOC = JSON.parse(locationMapJSON);
+      var _selProv = selectedProvince;
+      var _selDist = selectedDistrict;
+      var _selArea = selectedConstituency;
+
+      // ── Photo loading ──
       document.querySelectorAll('.candidate-card').forEach(function(card) {
         var img = card.querySelector('.candidate-photo');
         var fb  = card.querySelector('.photo-fallback');
         if (!img) return;
-        img.addEventListener('load', function() {
-          img.classList.remove('opacity-0');
-          if (fb) fb.style.display = 'none';
-        });
+        img.addEventListener('load', function() { img.classList.remove('opacity-0'); if (fb) fb.style.display = 'none'; });
         img.addEventListener('error', function() { img.remove(); });
       });
 
+      // ── Cascade helpers ──
+      function rebuildDistricts(province, keepDistrict) {
+        var sel = document.getElementById('districtSelect');
+        sel.innerHTML = '<option value="all">All Districts</option>';
+        var dists = province === 'all'
+          ? Object.values(LOC).flatMap(function(d) { return Object.keys(d); }).filter(function(v,i,a) { return a.indexOf(v)===i; }).sort()
+          : Object.keys(LOC[province] || {}).sort();
+        dists.forEach(function(d) {
+          var opt = document.createElement('option');
+          opt.value = d; opt.textContent = d;
+          if (d === keepDistrict) opt.selected = true;
+          sel.appendChild(opt);
+        });
+      }
+
+      function rebuildAreas(province, district, keepArea) {
+        var sel = document.getElementById('areaSelect');
+        sel.innerHTML = '<option value="all">All Areas</option>';
+        var areas = [];
+        if (district !== 'all' && province !== 'all') {
+          areas = (LOC[province] || {})[district] || [];
+        } else if (district !== 'all') {
+          // find province for this district
+          for (var p in LOC) { if (LOC[p][district]) { areas = LOC[p][district]; break; } }
+        } else if (province !== 'all') {
+          var seen = {};
+          Object.values(LOC[province] || {}).forEach(function(arr) { arr.forEach(function(n) { seen[n]=1; }); });
+          areas = Object.keys(seen).map(Number).sort(function(a,b){return a-b;});
+        }
+        areas.forEach(function(a) {
+          var opt = document.createElement('option');
+          opt.value = String(a); opt.textContent = 'क्षेत्र ' + a;
+          if (String(a) === keepArea) opt.selected = true;
+          sel.appendChild(opt);
+        });
+      }
+
+      // ── Auto-navigate on filter change ──
+      function navigateWithFilters() {
+        document.getElementById('filterSpinner') && (document.getElementById('filterSpinner').classList.remove('hidden'));
+        document.getElementById('filterForm').submit();
+      }
+
+      document.getElementById('provinceSelect').addEventListener('change', function() {
+        var prov = this.value;
+        rebuildDistricts(prov, 'all');
+        rebuildAreas(prov, 'all', 'all');
+        navigateWithFilters();
+      });
+
+      document.getElementById('districtSelect').addEventListener('change', function() {
+        var prov = document.getElementById('provinceSelect').value;
+        var dist = this.value;
+        rebuildAreas(prov, dist, 'all');
+        navigateWithFilters();
+      });
+
+      document.getElementById('areaSelect').addEventListener('change', function() {
+        navigateWithFilters();
+      });
+
+      document.getElementById('partySelect').addEventListener('change', function() {
+        navigateWithFilters();
+      });
+
+      document.getElementById('genderSelect').addEventListener('change', function() {
+        navigateWithFilters();
+      });
+
+      // Search: navigate on Enter key press
+      document.getElementById('searchInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); navigateWithFilters(); }
+      });
+
+      // Debounced auto-search after typing (500ms)
+      var searchTimer;
+      document.getElementById('searchInput').addEventListener('input', function() {
+        clearTimeout(searchTimer);
+        var val = this.value.trim();
+        if (val.length >= 2 || val.length === 0) {
+          searchTimer = setTimeout(navigateWithFilters, 500);
+        }
+      });
+
+      function clearSearch() {
+        document.getElementById('searchInput').value = '';
+        navigateWithFilters();
+      }
+
+      // ── Modal ──
       function openCandidateModal(card) {
         try {
           var encoded = card.getAttribute('data-enc');
-          // UTF-8 safe decode
           var bytes = Uint8Array.from(atob(encoded), function(ch) { return ch.charCodeAt(0); });
           var c = JSON.parse(new TextDecoder().decode(bytes));
 
@@ -364,42 +436,31 @@ function pageUrl(p: number) {
             ? c.district + ' \u2013 \u0915\u094d\u0937\u0947\u0924\u094d\u0930 ' + c.constituency
             : (c.district || '\u2014');
 
-          var photoUrl = c.id
-            ? 'https://election.gov.np/2082/uploads/images/candidates/' + c.id + '.jpg'
-            : null;
+          var photoUrl = c.id ? 'https://election.gov.np/2082/uploads/images/candidates/' + c.id + '.jpg' : null;
 
           var rows = [
-            ['\ud83c\udf0f Province',      c.province],
+            ['\ud83c\udf0f Province',        c.province],
             ['\ud83d\udccd District \u2022 Area', areaLabel],
-            ['\ud83c\udf82 Age',           c.age ? c.age + ' years' : null],
-            ['\u2623 Gender',              c.gender],
-            ['\ud83c\udf93 Education',     c.qualification],
-            ['\u26f3 Election Symbol',     c.symbol_name],
-            ['\ud83d\udc68 Father\'s Name', c.father_name],
-            ['\ud83d\udc69 Spouse\'s Name', c.spouse_name],
-            ['\ud83c\udfe0 Address',       c.address],
-            ['\ud83d\udccb Other Info',    c.other_details],
+            ['\ud83c\udf82 Age',             c.age ? c.age + ' years' : null],
+            ['\u2623 Gender',                c.gender],
+            ['\ud83c\udf93 Education',       c.qualification],
+            ['\u26f3 Election Symbol',       c.symbol_name],
+            ['\ud83d\udc68 Father\'s Name',  c.father_name],
+            ['\ud83d\udc69 Spouse\'s Name',  c.spouse_name],
+            ['\ud83c\udfe0 Address',         c.address],
+            ['\ud83d\udccb Other Info',      c.other_details],
           ].filter(function(r) { return r[1] && r[1] !== '0' && r[1] !== '-'; });
 
-          var html = '';
-          // Hero header
-          html += '<div class="flex items-start gap-4 mb-5 pr-8">';
+          var html = '<div class="flex items-start gap-4 mb-5 pr-8">';
           html += '<div class="relative h-20 w-20 rounded-full bg-slate-100 overflow-hidden shrink-0 border-2 border-slate-200 flex-none">';
           html += '<div class="absolute inset-0 flex items-center justify-center text-2xl font-bold text-slate-400">' + (c.name ? c.name.charAt(0) : '?') + '</div>';
           if (photoUrl) html += '<img src="' + photoUrl + '" class="absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity" onload="this.classList.remove(\'opacity-0\')" onerror="this.remove()">';
-          html += '</div>';
-          html += '<div class="flex-1 min-w-0">';
+          html += '</div><div class="flex-1 min-w-0">';
           html += '<h2 class="text-xl font-bold leading-snug">' + (c.name || '\u2014') + '</h2>';
           if (c.party) html += '<p class="text-sm text-muted-foreground mt-0.5">' + c.party + '</p>';
-          if (c.symbol_name) {
-            html += '<div class="mt-2 inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-xs px-2.5 py-1 rounded-full border border-amber-200">';
-            html += '\u26f3 \u091a\u093f\u0928\u094d\u0939: ' + c.symbol_name + '</div>';
-          }
-          html += '<div class="mt-2 inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs px-2.5 py-1 rounded-full border border-blue-200 ml-1">';
-          html += '\ud83d\udccd ' + areaLabel + '</div>';
+          if (c.symbol_name) html += '<div class="mt-1.5 inline-flex items-center gap-1 bg-amber-50 text-amber-700 text-xs px-2 py-0.5 rounded-full border border-amber-200">\u26f3 ' + c.symbol_name + '</div>';
+          html += '<div class="mt-1.5 inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full border border-blue-200 ml-1">\ud83d\udccd ' + areaLabel + '</div>';
           html += '</div></div>';
-
-          // Detail rows
           html += '<div class="rounded-xl border border-border overflow-hidden text-sm divide-y divide-border">';
           rows.forEach(function(row, i) {
             html += '<div class="flex gap-3 px-4 py-2.5 ' + (i % 2 === 0 ? 'bg-secondary/30' : '') + '">';
@@ -410,8 +471,7 @@ function pageUrl(p: number) {
           html += '</div>';
 
           document.getElementById('modalBody').innerHTML = html;
-          var modal = document.getElementById('candidateModal');
-          modal.style.display = 'flex';
+          document.getElementById('candidateModal').style.display = 'flex';
           document.body.style.overflow = 'hidden';
         } catch(e) { console.error('Modal error:', e); }
       }
@@ -421,9 +481,7 @@ function pageUrl(p: number) {
         document.body.style.overflow = '';
       }
 
-      document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') closeCandidateModal();
-      });
+      document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeCandidateModal(); });
     </script>
   </body>
 </html>
