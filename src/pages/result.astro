@@ -1,40 +1,589 @@
 ---
+export const prerender = false;
+import { createClient } from '@supabase/supabase-js';
 import '../styles/global.css';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
+
+const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || process.env.PUBLIC_SUPABASE_URL;
+const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || process.env.PUBLIC_SUPABASE_ANON_KEY;
+if (!supabaseUrl || !supabaseKey) throw new Error('Missing Supabase credentials');
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+// ── Fetch Initial Data on Server ──────────────────────────────────
+const { data: partySummaryData } = await supabase
+  .from('party_summary')
+  .select('*')
+  .order('fptp_won', { ascending: false })
+  .order('fptp_leading', { ascending: false })
+  .order('pr_votes', { ascending: false });
+
+const initialPartySummary = partySummaryData || [];
+
+const { data: candidateResultsData } = await supabase
+  .from('candidates')
+  .select('candidate_id, name, party, district, constituency, total_votes_received, vote_percentage, status, last_updated')
+  .or('total_votes_received.gt.0,status.neq.counting')
+  .order('status', { ascending: true }) // won, then leading, etc.
+  .order('total_votes_received', { ascending: false })
+  .limit(50);
+
+const initialCandidateResults = candidateResultsData || [];
+
+function getStatusColor(status: string) {
+  if (status.toLowerCase() === 'won') return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800';
+  if (status.toLowerCase() === 'leading') return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800';
+  return 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-400 border-gray-200 dark:border-gray-700';
+}
+
+function getStatusText(status: string) {
+  if (status.toLowerCase() === 'won') return 'विजयी (Won)';
+  if (status.toLowerCase() === 'leading') return 'अग्रता (Leading)';
+  return 'गणना हुँदै (Counting)';
+}
 ---
 
 <html lang="ne">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width" />
-    <title>नतिजा (Result) | निर्वाचन डाटा</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>नतिजा (Results) | Nepal Election 2082</title>
+    <meta name="description" content="Live election results for Nepal House of Representatives 2082." />
+    <!-- Pass environment variables to client script -->
+    <meta name="env-supabase-url" content={supabaseUrl} />
+    <meta name="env-supabase-key" content={supabaseKey} />
+    <script type="application/json" id="initial-party-summary" set:html={JSON.stringify(initialPartySummary)}></script>
   </head>
   <body class="bg-background min-h-screen font-sans antialiased text-foreground flex flex-col">
     
-    <!-- Navigation Header -->
     <Header activeTab="result" />
 
-    <main class="container mx-auto px-4 py-8 flex-1 flex flex-col items-center justify-center">
-      <div class="text-center max-w-xl mx-auto py-20">
-        <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-secondary text-primary/80 dark:text-primary mb-6">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-10 h-10"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-        </div>
-        
-        <h1 class="text-3xl md:text-5xl font-bold tracking-tight mb-4 nepali-text text-foreground">
-          नतिजा आउँदैछ
+    <main class="container mx-auto px-4 py-8 flex-1">
+      <div class="mb-10 text-center">
+        <h1 class="text-3xl md:text-5xl font-bold tracking-tight mb-4 flex items-center justify-center gap-3">
+          <span class="text-red-500 animate-pulse text-4xl">🔴</span> 
+          Nepal House of Representatives 2082 
+          <span class="text-xl md:text-2xl font-normal text-muted-foreground ml-2 hidden sm:inline">– Live Results</span>
         </h1>
-        <p class="text-lg text-muted-foreground mb-8">
-          Detailed election results will be published here soon. Please check back later for live updates.
+        <p class="text-muted-foreground text-sm md:text-base max-w-2xl mx-auto">
+          प्रत्यक्ष (FPTP) र समानुपातिक (PR) निर्वाचन प्रणालीको पछिल्लो मतपरिणाम।
         </p>
         
-        <a href="/" class="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 h-10 px-8 py-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full shadow-sm">
-          ड्यासबोर्डमा फर्कनुहोस् (Return to Dashboard)
-        </a>
+        <div class="flex items-center justify-center gap-4 mt-6">
+          <p class="text-sm font-medium text-muted-foreground bg-secondary/50 px-4 py-2 rounded-full border border-border" id="last-updated-text">
+            Last updated: <span class="font-mono text-foreground font-bold">{new Date().toLocaleTimeString()}</span>
+          </p>
+          <button 
+            id="refresh-btn"
+            class="inline-flex items-center justify-center w-10 h-10 md:w-auto md:px-4 md:py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium rounded-full shadow-sm transition-all hover:scale-105 active:scale-95"
+            title="Refresh Live Data"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 md:mr-2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21v-5h5"/></svg>
+            <span class="hidden md:inline">Refresh Now</span>
+          </button>
+        </div>
       </div>
+
+      <!-- Main Dashboard Grid -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-12">
+        
+        <!-- Left Column: Party Leaderboard (Top 5) -->
+        <div class="lg:col-span-5 flex flex-col gap-6">
+          <section>
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-2xl font-bold flex items-center gap-2 border-l-4 border-blue-600 pl-3">
+                Party Leaderboard
+              </h2>
+              <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary px-2 py-1 rounded">Top 5</span>
+            </div>
+            
+            <div class="flex flex-col gap-4" id="party-leaderboard">
+              <!-- Rendered via JS -->
+              {initialPartySummary.length === 0 && (
+                <div class="text-center p-8 bg-card border border-border rounded-2xl">
+                  <p class="text-muted-foreground">दलगत नतिजा उपलब्ध छैन।</p>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <!-- Overall Constituency Progress (Mocked for dashboard feel) -->
+          <section class="bg-card border border-border rounded-2xl p-6 shadow-sm">
+            <h3 class="font-bold text-lg mb-4 flex items-center justify-between">
+              Constituency Progress
+              <span class="text-sm font-normal text-muted-foreground tracking-tight">165 Total FPTP</span>
+            </h3>
+            <div class="space-y-4">
+              <div>
+                <div class="flex justify-between text-sm mb-1">
+                  <span class="font-medium text-green-600 dark:text-green-400">Results Declared (Won)</span>
+                  <span class="font-bold" id="total-won-count">0</span>
+                </div>
+                <div class="w-full bg-secondary rounded-full h-2.5 overflow-hidden">
+                  <div class="bg-green-500 h-2.5 rounded-full transition-all duration-1000 ease-out" id="total-won-bar" style="width: 0%"></div>
+                </div>
+              </div>
+              <div>
+                <div class="flex justify-between text-sm mb-1">
+                  <span class="font-medium text-blue-600 dark:text-blue-400">Counting/Leading</span>
+                  <span class="font-bold" id="total-leading-count">0</span>
+                </div>
+                <div class="w-full bg-secondary rounded-full h-2.5 overflow-hidden">
+                  <div class="bg-blue-500 h-2.5 rounded-full transition-all duration-1000 ease-out" id="total-leading-bar" style="width: 0%"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Right Column: Constituency Results -->
+        <div class="lg:col-span-7">
+          <section>
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-2xl font-bold flex items-center gap-2 border-l-4 border-green-600 pl-3">
+                Constituency Results
+              </h2>
+              <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary px-2 py-1 rounded">Top 20</span>
+            </div>
+
+            <div class="flex flex-col gap-3" id="candidates-list-container">
+              <!-- Rendered via JS -->
+            </div>
+          </section>
+        </div>
+
+      </div>
+
     </main>
 
     <Footer />
+
+    <script is:inline src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script is:inline>
+      // ── Live Data API Endpoints ──────────────────────────────────
+      const NEPALVOTES_API = 'https://pub-4173e04d0b78426caa8cfa525f827daa.r2.dev/constituencies.json';
+      const HAMROPATRO_API = 'https://election-dashboard-68fv.onrender.com/data';
+      const POLLING_INTERVAL = 60000; // 60 seconds for live data
+
+      // ── Mock fallback data ──────────────────────────────────────
+      const MOCK_PARTIES = [
+        { party_name: 'Nepali Congress (NC)', fptp_leading: 12, fptp_won: 45, pr_votes: 1250000, pr_percentage: 28.5 },
+        { party_name: 'CPN (UML)', fptp_leading: 8, fptp_won: 40, pr_votes: 1100000, pr_percentage: 25.1 },
+        { party_name: 'Rastriya Swatantra Party (RSP)', fptp_leading: 15, fptp_won: 10, pr_votes: 950000, pr_percentage: 21.6 },
+        { party_name: 'CPN (Maoist Centre)', fptp_leading: 5, fptp_won: 12, pr_votes: 500000, pr_percentage: 11.4 },
+        { party_name: 'Rastriya Prajatantra Party', fptp_leading: 2, fptp_won: 5, pr_votes: 300000, pr_percentage: 6.8 }
+      ];
+      const MOCK_CANDIDATES = [
+        { name: 'Gagan Kumar Thapa', party: 'Nepali Congress (NC)', district: 'Kathmandu', constituency: '4', total_votes_received: 25000, vote_percentage: 55.2, status: 'leading', candidate_id: null },
+        { name: 'Rajan Bhattarai', party: 'CPN (UML)', district: 'Kathmandu', constituency: '4', total_votes_received: 22500, vote_percentage: 42.1, status: 'counting', candidate_id: null },
+        { name: 'Rabi Lamichhane', party: 'Rastriya Swatantra Party (RSP)', district: 'Chitwan', constituency: '2', total_votes_received: 35000, vote_percentage: 68.5, status: 'won', candidate_id: null },
+        { name: 'KP Sharma Oli', party: 'CPN (UML)', district: 'Jhapa', constituency: '5', total_votes_received: 38000, vote_percentage: 52.1, status: 'leading', candidate_id: null },
+        { name: 'Pushpa Kamal Dahal', party: 'CPN (Maoist Centre)', district: 'Gorkha', constituency: '2', total_votes_received: 15000, vote_percentage: 45.0, status: 'leading', candidate_id: null },
+        { name: 'Rajendra Lingden', party: 'Rastriya Prajatantra Party', district: 'Jhapa', constituency: '3', total_votes_received: 12000, vote_percentage: 25.5, status: 'counting', candidate_id: null }
+      ];
+
+      // ── Transform NepalVotes constituency data into party leaderboard ──
+      function aggregatePartyData(constituencies) {
+        const partyMap = {};
+        let totalVotesAllParties = 0;
+
+        constituencies.forEach(c => {
+          if (!c.candidates || c.candidates.length === 0) return;
+
+          // Find top candidate in this constituency
+          const sorted = [...c.candidates].sort((a, b) => (b.votes || 0) - (a.votes || 0));
+          const leader = sorted[0];
+
+          c.candidates.forEach(cand => {
+            const pName = cand.partyName || 'Independent';
+            if (!partyMap[pName]) {
+              partyMap[pName] = { party_name: pName, fptp_won: 0, fptp_leading: 0, pr_votes: 0, pr_percentage: 0 };
+            }
+            partyMap[pName].pr_votes += (cand.votes || 0);
+            totalVotesAllParties += (cand.votes || 0);
+
+            if (cand.isWinner) {
+              partyMap[pName].fptp_won += 1;
+            }
+          });
+
+          // Count leading (top candidate if not already winner and has votes)
+          if (leader && leader.votes > 0 && !leader.isWinner) {
+            const pName = leader.partyName || 'Independent';
+            if (partyMap[pName]) {
+              partyMap[pName].fptp_leading += 1;
+            }
+          }
+        });
+
+        // Calculate PR percentage
+        const parties = Object.values(partyMap);
+        if (totalVotesAllParties > 0) {
+          parties.forEach(p => {
+            p.pr_percentage = ((p.pr_votes / totalVotesAllParties) * 100);
+          });
+        }
+
+        return parties;
+      }
+
+      // ── Transform NepalVotes constituency data into candidate list ──
+      function flattenCandidates(constituencies) {
+        const candidates = [];
+        constituencies.forEach(c => {
+          if (!c.candidates || c.candidates.length === 0) return;
+          const sorted = [...c.candidates].sort((a, b) => (b.votes || 0) - (a.votes || 0));
+          const leader = sorted[0];
+
+          c.candidates.forEach(cand => {
+            if (cand.votes <= 0) return; // Skip candidates with zero votes
+            const isLeading = (cand === leader && cand.votes > 0 && !cand.isWinner);
+            candidates.push({
+              name: cand.nameNp || cand.name,
+              party: cand.partyName || 'Independent',
+              district: c.district || c.districtNp || '',
+              constituency: c.name || '',
+              total_votes_received: cand.votes || 0,
+              vote_percentage: c.votesCast > 0 ? ((cand.votes / c.votesCast) * 100) : 0,
+              status: cand.isWinner ? 'won' : (isLeading ? 'leading' : 'counting'),
+              candidate_id: cand.candidateId || null
+            });
+          });
+        });
+
+        // Sort by votes descending, take top 20
+        candidates.sort((a, b) => b.total_votes_received - a.total_votes_received);
+        return candidates.slice(0, 20);
+      }
+
+      // ── Also try HamroPatro API as secondary source ──
+      function transformHamroPatroData(data) {
+        if (!data || !data.areas) return { parties: [], candidates: [] };
+        
+        const partyMap = {};
+        const candidates = [];
+        let totalVotesAll = 0;
+
+        data.areas.forEach(area => {
+          if (!area.result || !area.result.candidateResults) return;
+          const results = area.result.candidateResults;
+          const areaName = area.area ? (area.area.englishName || area.area.name) : '';
+
+          results.forEach(cr => {
+            const pName = cr.politicalPartyName || 'Independent';
+            if (!partyMap[pName]) {
+              partyMap[pName] = { party_name: pName, fptp_won: 0, fptp_leading: 0, pr_votes: 0, pr_percentage: 0 };
+            }
+            partyMap[pName].pr_votes += (cr.votes || 0);
+            totalVotesAll += (cr.votes || 0);
+
+            if (cr.winner) partyMap[pName].fptp_won += 1;
+            else if (cr.leading) partyMap[pName].fptp_leading += 1;
+
+            if (cr.votes > 0) {
+              candidates.push({
+                name: cr.candidateName || '',
+                party: pName,
+                district: areaName,
+                constituency: areaName,
+                total_votes_received: cr.votes || 0,
+                vote_percentage: area.result.totalCountedVotes > 0 ? ((cr.votes / area.result.totalCountedVotes) * 100) : 0,
+                status: cr.winner ? 'won' : (cr.leading ? 'leading' : 'counting'),
+                candidate_id: cr.candidateId || null
+              });
+            }
+          });
+        });
+
+        const parties = Object.values(partyMap);
+        if (totalVotesAll > 0) {
+          parties.forEach(p => { p.pr_percentage = (p.pr_votes / totalVotesAll) * 100; });
+        }
+
+        candidates.sort((a, b) => b.total_votes_received - a.total_votes_received);
+        return { parties, candidates: candidates.slice(0, 20) };
+      }
+
+      // ── Main data fetching function ────────────────────────────
+      async function fetchExternalData() {
+        const btn = document.getElementById('refresh-btn');
+        if (btn) btn.classList.add('opacity-50', 'pointer-events-none');
+
+        let partyData = null;
+        let candidateData = null;
+        let isLive = false;
+
+        try {
+          // Fetch from our server-side proxy (bypasses CORS)
+          console.log('[Live] Fetching from /api/live-data proxy...');
+          const proxyRes = await fetch('/api/live-data', { cache: 'no-store' }).catch(() => null);
+          
+          if (proxyRes && proxyRes.ok) {
+            const proxyData = await proxyRes.json().catch(() => null);
+            
+            if (proxyData && proxyData.source === 'nepalvotes' && proxyData.constituencies) {
+              console.log('[Live] NepalVotes: ' + proxyData.constituencies.length + ' constituencies loaded via proxy');
+              partyData = aggregatePartyData(proxyData.constituencies);
+              candidateData = proxyData.constituencies;
+              isLive = true;
+            } else if (proxyData && proxyData.source === 'hamropatro' && proxyData.data) {
+              console.log('[Live] HamroPatro: ' + proxyData.data.areas.length + ' areas loaded via proxy');
+              const transformed = transformHamroPatroData(proxyData.data);
+              partyData = transformed.parties;
+              candidateData = transformed.candidates;
+              isLive = true;
+            }
+          }
+        } catch (err) {
+          console.warn('[Live] Proxy fetch error, falling back to mock:', err);
+        }
+
+
+        // Fallback to mock data if both APIs failed
+        if (!isLive || !partyData || partyData.length === 0) {
+          console.log('[Fallback] Using mock data');
+          partyData = MOCK_PARTIES;
+          candidateData = MOCK_CANDIDATES;
+          isLive = false;
+        }
+
+        // Render the data
+        renderPartyLeaderboard(partyData);
+        renderCandidatesList(candidateData);
+
+        // Update timestamp with LIVE/MOCK indicator
+        const updatedEl = document.getElementById('last-updated-text');
+        if (updatedEl) {
+          const badge = isLive
+            ? '<span class="text-green-600 text-xs ml-2 border border-green-500 rounded px-1 font-bold">LIVE</span>'
+            : '<span class="text-amber-500 text-xs ml-2 border border-amber-500 rounded px-1">MOCK</span>';
+          updatedEl.innerHTML = 'Last updated: <span class="font-mono font-medium text-foreground">' + new Date().toLocaleTimeString() + '</span> ' + badge;
+        }
+
+        if (btn) {
+          btn.classList.remove('opacity-50', 'pointer-events-none');
+          const svg = btn.querySelector('svg');
+          if (svg) {
+            svg.classList.add('animate-spin');
+            setTimeout(() => svg.classList.remove('animate-spin'), 600);
+          }
+        }
+      }
+
+      // ── Render functions ───────────────────────────────────────
+
+      function renderPartyLeaderboard(partiesData) {
+        const container = document.getElementById('party-leaderboard');
+        if(!container) return;
+        
+        container.style.opacity = '0.5';
+        container.style.transition = 'opacity 0.3s ease';
+
+        setTimeout(() => {
+          const parties = Array.isArray(partiesData) ? partiesData : [];
+          const topParties = [...parties].sort((a,b) => 
+            ((b.fptp_won||0) * 1000 + (b.fptp_leading||0)) - ((a.fptp_won||0) * 1000 + (a.fptp_leading||0))
+          ).slice(0, 5);
+
+          const rankColors = ['bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-500 border-yellow-200 dark:border-yellow-800', 
+                              'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700', 
+                              'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-500 border-orange-200 dark:border-orange-800',
+                              'bg-secondary text-secondary-foreground border-transparent',
+                              'bg-secondary text-secondary-foreground border-transparent'];
+
+          let totalWon = 0;
+          let totalLeading = 0;
+
+          if (topParties.length === 0) {
+            container.innerHTML = '<div class="text-center p-8 bg-card border border-border rounded-2xl"><p class="text-muted-foreground">Waiting for party data...</p></div>';
+          } else {
+            container.innerHTML = topParties.map((p, idx) => {
+              totalWon += (p.fptp_won || 0);
+              totalLeading += (p.fptp_leading || 0);
+              return '<div class="bg-card border border-border rounded-2xl p-5 shadow-sm transform transition duration-300 hover:shadow-md relative overflow-hidden flex items-center gap-4">' +
+                '<div class="absolute top-0 left-0 w-1 h-full bg-primary opacity-20"></div>' +
+                '<div class="shrink-0 flex flex-col items-center justify-center w-10">' +
+                  '<span class="text-sm font-bold text-muted-foreground uppercase mb-1">Rank</span>' +
+                  '<div class="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm ' + (rankColors[idx] || rankColors[4]) + '">' + (idx + 1) + '</div>' +
+                '</div>' +
+                '<div class="flex-1 min-w-0 border-l border-border pl-4">' +
+                  '<h3 class="font-bold text-lg text-foreground truncate" title="' + p.party_name + '">' + p.party_name + '</h3>' +
+                  '<p class="text-xs text-muted-foreground mt-0.5"><span class="font-medium">' + (p.pr_votes || 0).toLocaleString() + '</span> Total Votes (' + (p.pr_percentage != null ? parseFloat(p.pr_percentage).toFixed(2) + '%' : '0%') + ')</p>' +
+                '</div>' +
+                '<div class="shrink-0 flex gap-2 md:gap-4 text-center">' +
+                  '<div class="bg-green-50 dark:bg-green-900/20 rounded-lg px-3 py-2 border border-green-100 dark:border-green-800/50 min-w-[60px]">' +
+                    '<p class="text-[10px] font-bold text-green-600 dark:text-green-500 uppercase">Won</p>' +
+                    '<p class="text-2xl font-black text-green-700 dark:text-green-400 leading-none mt-1">' + (p.fptp_won || 0) + '</p>' +
+                  '</div>' +
+                  '<div class="bg-blue-50 dark:bg-blue-900/20 rounded-lg px-3 py-2 border border-blue-100 dark:border-blue-800/50 min-w-[60px]">' +
+                    '<p class="text-[10px] font-bold text-blue-600 dark:text-blue-500 uppercase">Lead</p>' +
+                    '<p class="text-2xl font-black text-blue-700 dark:text-blue-400 leading-none mt-1">' + (p.fptp_leading || 0) + '</p>' +
+                  '</div>' +
+                '</div>' +
+              '</div>';
+            }).join('');
+          }
+
+          // Update progress bars from ALL parties, not just top 5
+          parties.forEach(p => {
+            if (!topParties.includes(p)) {
+              totalWon += (p.fptp_won || 0);
+              totalLeading += (p.fptp_leading || 0);
+            }
+          });
+
+          const wonEl = document.getElementById('total-won-count');
+          const leadEl = document.getElementById('total-leading-count');
+          const wonBar = document.getElementById('total-won-bar');
+          const leadBar = document.getElementById('total-leading-bar');
+
+          if(wonEl) wonEl.innerText = totalWon;
+          if(leadEl) leadEl.innerText = totalLeading;
+          if(wonBar) wonBar.style.width = Math.min((totalWon / 165) * 100, 100) + '%';
+          if(leadBar) leadBar.style.width = Math.min((totalLeading / 165) * 100, 100) + '%';
+
+          container.style.opacity = '1';
+        }, 300);
+      }
+
+      // ── Party color map for badges (matching candidates page) ──
+      var PARTY_COLORS = {
+        'नेपाली काँग्रेस': { bg: '#16a34a', text: '#fff', short: 'NC' },
+        'नेपाल कम्युनिष्ट पार्टी (एकीकृत मार्क्सवादी लेनिनवादी)': { bg: '#dc2626', text: '#fff', short: 'UML' },
+        'राष्ट्रिय स्वतन्त्र पार्टी': { bg: '#2563eb', text: '#fff', short: 'RSP' },
+        'नेपाल कम्युनिष्ट पार्टी (माओवादी केन्द्र)': { bg: '#e11d48', text: '#fff', short: 'NCP' },
+        'नेपाल कम्युनिस्ट पार्टी (माओवादी)': { bg: '#e11d48', text: '#fff', short: 'NCP' },
+        'राष्ट्रिय प्रजातन्त्र पार्टी': { bg: '#7c3aed', text: '#fff', short: 'RPP' },
+        'जनता समाजवादी पार्टी, नेपाल': { bg: '#ca8a04', text: '#fff', short: 'JSP' },
+        'नेपाली काँग्रेस (समाजवादी)': { bg: '#22c55e', text: '#fff', short: 'NCS' },
+        'लोकतान्त्रिक समाजवादी पार्टी, नेपाल': { bg: '#0284c7', text: '#fff', short: 'LSP' },
+        'नागरिक उन्मुक्ति पार्टी': { bg: '#7c3aed', text: '#fff', short: 'NUP' },
+        'जनमत पार्टी': { bg: '#0d9488', text: '#fff', short: 'JMP' },
+        'राष्ट्रिय जनमोर्चा': { bg: '#be185d', text: '#fff', short: 'RJM' },
+        'श्रम संस्कृति पार्टी': { bg: '#475569', text: '#fff', short: 'SSP' },
+        'स्वतन्त्र': { bg: '#6b7280', text: '#fff', short: 'IND' }
+      };
+
+      function getPartyBadge(partyName) {
+        var match = PARTY_COLORS[partyName];
+        if (!match) {
+          // Try partial match
+          var keys = Object.keys(PARTY_COLORS);
+          for (var i = 0; i < keys.length; i++) {
+            if (partyName && partyName.indexOf(keys[i].substring(0, 8)) !== -1) { match = PARTY_COLORS[keys[i]]; break; }
+          }
+        }
+        var bg = match ? match.bg : '#9e9e9e';
+        var text = match ? match.text : '#fff';
+        var short = match ? match.short : (partyName ? partyName.substring(0, 3) : '?');
+        return '<span style="background:' + bg + ';color:' + text + '" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ml-1 whitespace-nowrap">' + short + '</span>';
+      }
+
+      function renderCandidatesList(constituencies) {
+        var container = document.getElementById('candidates-list-container');
+        if (!container) return;
+        
+        container.style.opacity = '0.5';
+        container.style.transition = 'opacity 0.3s ease';
+
+        setTimeout(function() {
+          var items = Array.isArray(constituencies) ? constituencies : [];
+
+          // Sort: constituencies with most votes cast first, show top 20
+          var sorted = items.filter(function(c) { return c.candidates && c.candidates.length > 0; })
+            .sort(function(a, b) { return (b.votesCast || 0) - (a.votesCast || 0); })
+            .slice(0, 20);
+
+          if (sorted.length === 0) {
+            container.innerHTML = '<div class="text-center p-12 bg-card border border-border rounded-2xl"><h3 class="text-lg font-bold mb-2">मतगणना सुरू हुन बाँकी</h3><p class="text-muted-foreground">कुनै पनि क्षेत्रको मत विवरण प्राप्त भएको छैन।</p></div>';
+          } else {
+            // Build table header
+            var header = '<div class="bg-card border border-border rounded-xl overflow-hidden">' +
+              '<table class="w-full text-left border-collapse">' +
+              '<thead><tr class="bg-secondary/30 text-secondary-foreground border-b border-border text-[11px] uppercase tracking-wider">' +
+              '<th class="px-4 py-2.5 font-semibold">Constituency</th>' +
+              '<th class="px-4 py-2.5 font-semibold">Key Candidates</th>' +
+              '<th class="px-4 py-2.5 font-semibold text-right">Votes Cast</th>' +
+              '<th class="px-4 py-2.5 font-semibold text-right hidden sm:table-cell">Voters</th>' +
+              '</tr></thead><tbody>';
+
+            var rows = sorted.map(function(c) {
+              var cands = [...c.candidates].sort(function(a, b) { return (b.votes || 0) - (a.votes || 0); });
+              var top3 = cands.slice(0, 3);
+              var remaining = cands.length - 3;
+              var totalVoters = c.totalVoters || 0;
+              var votesCast = c.votesCast || 0;
+              var countedPct = totalVoters > 0 ? ((votesCast / totalVoters) * 100).toFixed(1) : '0';
+              var province = c.province || '';
+              var district = c.district || c.districtNp || '';
+              var constName = c.name || c.code || '';
+
+              // Status badge
+              var status = c.status || 'PENDING';
+              var statusBadge = '';
+              if (status === 'COMPLETED') statusBadge = '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 ml-2">DECLARED</span>';
+              else if (status === 'COUNTING') statusBadge = '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 ml-2">COUNTING</span>';
+              else statusBadge = '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground ml-2">PENDING</span>';
+
+              // Candidate rows
+              var candHtml = top3.map(function(cand, ci) {
+                var bullet = ci === 0 ? '🟢' : '🟡';
+                if (cand.isWinner) bullet = '🏆';
+                var name = cand.nameNp || cand.name || '';
+                var badge = getPartyBadge(cand.partyName || '');
+                return '<div class="flex items-center gap-1 py-0.5">' +
+                  '<span class="text-xs">' + bullet + '</span>' +
+                  '<span class="text-sm font-medium text-foreground truncate max-w-[140px] md:max-w-[200px]" title="' + name + '">' + name + '</span>' +
+                  badge + '</div>';
+              }).join('');
+
+              if (remaining > 0) {
+                candHtml += '<span class="text-[11px] text-muted-foreground">+' + remaining + ' more</span>';
+              }
+
+              // Votes cast column: show top 3 candidate votes with party color indicators
+              var votesHtml = top3.map(function(cand) {
+                var match = PARTY_COLORS[cand.partyName];
+                var color = match ? match.bg : '#9e9e9e';
+                var short = match ? match.short : '';
+                return '<div class="flex items-center justify-end gap-1.5 py-0.5">' +
+                  '<span class="text-[11px] text-muted-foreground">' + (short ? short + ' ' : '') + '</span>' +
+                  '<span class="font-mono text-sm font-bold" style="color:' + color + '">' + (cand.votes || 0).toLocaleString() + '</span>' +
+                  (cand.isWinner ? ' <span class="text-[10px]">🏆</span>' : '') +
+                  '</div>';
+              }).join('');
+
+              // Counted percentage bar
+              var pctNum = parseFloat(countedPct);
+              var pctBar = votesCast > 0
+                ? '<div class="mt-1"><div class="flex items-center justify-end gap-1"><span class="text-[10px] text-muted-foreground">' + countedPct + '% counted</span></div>' +
+                  '<div class="w-full bg-secondary rounded-full h-1 mt-0.5"><div class="h-1 rounded-full transition-all ' + (pctNum >= 100 ? 'bg-green-500' : 'bg-blue-500') + '" style="width:' + Math.min(pctNum, 100) + '%"></div></div></div>'
+                : '<div class="text-[10px] text-muted-foreground mt-1 text-right">– not started</div>';
+
+              return '<tr class="border-b border-border/50 hover:bg-secondary/10 transition-colors">' +
+                '<td class="px-4 py-3 align-top">' +
+                  '<div class="font-bold text-sm text-foreground">' + constName + statusBadge + '</div>' +
+                  '<div class="text-[11px] text-muted-foreground">' + province + ' · ' + district + '</div>' +
+                '</td>' +
+                '<td class="px-4 py-3 align-top">' + candHtml + '</td>' +
+                '<td class="px-4 py-3 align-top text-right">' + votesHtml + pctBar + '</td>' +
+                '<td class="px-4 py-3 align-top text-right hidden sm:table-cell">' +
+                  '<span class="font-mono text-sm font-medium text-muted-foreground">' + totalVoters.toLocaleString() + '</span>' +
+                '</td>' +
+              '</tr>';
+            }).join('');
+
+            container.innerHTML = header + rows + '</tbody></table></div>';
+          }
+          container.style.opacity = '1';
+        }, 300);
+      }
+
+      // ── Initial execution ──────────────────────────────────────
+      fetchExternalData();
+      document.getElementById('refresh-btn')?.addEventListener('click', fetchExternalData);
+      console.log('[Polling] Live data polling every ' + (POLLING_INTERVAL/1000) + 's');
+      setInterval(fetchExternalData, POLLING_INTERVAL);
+    </script>
   </body>
 </html>

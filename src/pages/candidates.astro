@@ -21,19 +21,33 @@ const currentPage          = Math.max(1, Number(Astro.url.searchParams.get('page
 const pageSize = 24;
 
 // ── Build main query ────────────────────────────────────────
-let query = supabase
-  .from('candidates')
-  .select('candidate_id,name,age,gender,party,province,district,constituency,qualification,address,symbol_name,father_name,spouse_name,other_details', { count: 'exact' })
-  .range((currentPage - 1) * pageSize, currentPage * pageSize - 1)
-  .order('district').order('constituency').order('name');
-
 const trimmedSearch = searchQuery.trim();
-if (trimmedSearch)                    query = query.ilike('name', `%${trimmedSearch}%`);
-if (selectedGender      !== 'all')    query = query.eq('gender',       selectedGender);
-if (selectedProvince    !== 'all')    query = query.eq('province',     selectedProvince);
-if (selectedDistrict    !== 'all')    query = query.eq('district',     selectedDistrict);
-if (selectedConstituency !== 'all')   query = query.eq('constituency', Number(selectedConstituency));
-if (selectedParty       !== 'all')    query = query.eq('party',        selectedParty);
+const isLikelyEnglish = trimmedSearch && /^[a-zA-Z\s.'\-]+$/.test(trimmedSearch);
+
+function buildBaseQuery() {
+  let q = supabase
+    .from('candidates')
+    .select('candidate_id,name,age,gender,party,province,district,constituency,qualification,address,symbol_name,father_name,spouse_name,other_details', { count: 'exact' })
+    .order('district').order('constituency').order('name');
+  if (selectedGender      !== 'all') q = q.eq('gender',       selectedGender);
+  if (selectedProvince    !== 'all') q = q.eq('province',     selectedProvince);
+  if (selectedDistrict    !== 'all') q = q.eq('district',     selectedDistrict);
+  if (selectedConstituency !== 'all') q = q.eq('constituency', Number(selectedConstituency));
+  if (selectedParty       !== 'all') q = q.eq('party',        selectedParty);
+  return q;
+}
+
+// For Nepali search, build and fire the query immediately in parallel
+// For English search, we defer until voteMap is available
+let mainQuery;
+if (!isLikelyEnglish) {
+  let q = buildBaseQuery();
+  if (trimmedSearch) q = q.ilike('name', `%${trimmedSearch}%`);
+  mainQuery = q.range((currentPage - 1) * pageSize, currentPage * pageSize - 1);
+} else {
+  // Placeholder — English search is done after voteMap loads
+  mainQuery = Promise.resolve({ data: [], error: null, count: 0 });
+}
 
 // ── Fetch filter data in parallel ───────────────────────────
 async function getAllUnique(col: string) {
@@ -62,7 +76,6 @@ async function buildLocationMap() {
     });
     if (data.length < 1000) break; p++;
   }
-  // Serialize: { province: { district: [1,2,3] } }
   const out: Record<string, Record<string, number[]>> = {};
   for (const prov in map) {
     out[prov] = {};
@@ -73,24 +86,133 @@ async function buildLocationMap() {
   return out;
 }
 
+// ── Fetch live vote data from HamroPatro API (faster updates) ──
+async function fetchLiveVoteData(): Promise<Record<number, { votes: number; rank: number; isWinner: boolean; status: string; constituency: string; englishName: string }>> {
+  const map: Record<number, { votes: number; rank: number; isWinner: boolean; status: string; constituency: string; englishName: string }> = {};
+  try {
+    // Step 1: Get all areas to find which ones have results
+    const areasRes = await fetch('https://keyvalue.hamropatro.com/kv/get/major-election-2082-areas::-1');
+    if (!areasRes.ok) throw new Error('Areas fetch failed');
+    const areasJson = await areasRes.json();
+    const areas = JSON.parse(areasJson.list[0].value);
+    const areaIds = areas.map((a: any) => a.id);
+
+    // Step 2: Batch fetch all area results in one request
+    const batchKeys = areaIds.map((id: string) => `major-election-2082-areas-${id}-result::-1`).join('::');
+    const batchRes = await fetch(`https://keyvalue.hamropatro.com/kv/get/${batchKeys}`);
+    if (!batchRes.ok) throw new Error('Batch results fetch failed');
+    const batchJson = await batchRes.json();
+
+    // Step 3: Parse each area result
+    batchJson.list.forEach((item: any) => {
+      try {
+        const areaResult = JSON.parse(item.value);
+        if (!areaResult.candidateResults || areaResult.candidateResults.length === 0) return;
+        const sorted = [...areaResult.candidateResults].sort((a: any, b: any) => (b.votes || 0) - (a.votes || 0));
+        const constName = `${areaResult.districtName || ''} ${areaResult.areaName || ''}`.trim();
+        areaResult.candidateResults.forEach((cand: any) => {
+          if (!cand.candidateId) return;
+          const candId = Number(cand.candidateId);
+          const rank = sorted.indexOf(cand) + 1;
+          let status = 'counting';
+          if (cand.winner) status = 'won';
+          else if (rank === 1 && cand.votes > 0) status = 'leading';
+          else if (rank === 2 && cand.votes > 0) status = 'runner-up';
+          map[candId] = {
+            votes: cand.votes || 0, rank,
+            isWinner: cand.winner || false, status,
+            constituency: constName,
+            englishName: cand.englishName || '',
+          };
+        });
+      } catch (e) { /* skip malformed entries */ }
+    });
+    console.log(`[candidates] HamroPatro: loaded ${Object.keys(map).length} candidates from ${batchJson.list.length} areas`);
+  } catch (e) {
+    console.error('[candidates] HamroPatro fetch failed, trying NepalVotes fallback:', e);
+    // Fallback to NepalVotes R2
+    try {
+      const res = await fetch('https://pub-4173e04d0b78426caa8cfa525f827daa.r2.dev/constituencies.json');
+      if (res.ok) {
+        const text = await res.text();
+        if (text.trim().startsWith('[')) {
+          const constituencies = JSON.parse(text);
+          constituencies.forEach((c: any) => {
+            if (!c.candidates) return;
+            const sorted = [...c.candidates].sort((a: any, b: any) => (b.votes || 0) - (a.votes || 0));
+            c.candidates.forEach((cand: any) => {
+              if (!cand.candidateId) return;
+              const rank = sorted.indexOf(cand) + 1;
+              let status = 'counting';
+              if (cand.isWinner) status = 'won';
+              else if (rank === 1 && cand.votes > 0) status = 'leading';
+              else if (rank === 2 && cand.votes > 0) status = 'runner-up';
+              map[cand.candidateId] = {
+                votes: cand.votes || 0, rank,
+                isWinner: cand.isWinner || false, status,
+                constituency: c.name || c.code || '',
+                englishName: cand.name || '',
+              };
+            });
+          });
+        }
+      }
+    } catch (e2) { console.error('[candidates] NepalVotes fallback also failed:', e2); }
+  }
+  return map;
+}
+
 const [
-  { data: candidates = [], error, count: totalCount = 0 },
+  mainResult,
   uniqueParties,
   locationMap,
-] = await Promise.all([query, getAllUnique('party'), buildLocationMap()]);
+  voteMap,
+] = await Promise.all([mainQuery, getAllUnique('party'), buildLocationMap(), fetchLiveVoteData()]);
+
+// ── English name search: find matching IDs from voteMap ──
+let candidates: any[] = [];
+let totalCount: number = 0;
+let error: any = null;
+
+if (isLikelyEnglish && trimmedSearch) {
+  const matchingIds = Object.entries(voteMap)
+    .filter(([_, v]) => v.englishName && v.englishName.toLowerCase().includes(trimmedSearch.toLowerCase()))
+    .map(([id]) => Number(id));
+
+  if (matchingIds.length > 0) {
+    let engQuery = buildBaseQuery().in('candidate_id', matchingIds);
+    const engResult = await engQuery.range((currentPage - 1) * pageSize, currentPage * pageSize - 1);
+    candidates = engResult.data || [];
+    totalCount = engResult.count || 0;
+    error = engResult.error;
+  }
+} else {
+  candidates = mainResult.data || [];
+  totalCount = mainResult.count || 0;
+  error = mainResult.error;
+}
 
 const totalPages = Math.ceil((totalCount || 0) / pageSize);
 
 // Derive filter dropdown options from locationMap
 const uniqueProvinces = Object.keys(locationMap).sort();
+// Show districts for selected province, or ALL districts if no province selected
 const uniqueDistricts = selectedProvince !== 'all'
   ? Object.keys(locationMap[selectedProvince] || {}).sort()
   : Object.values(locationMap).flatMap(dmap => Object.keys(dmap)).filter((v,i,a) => a.indexOf(v)===i).sort();
-const uniqueAreas = selectedDistrict !== 'all'
-  ? (locationMap[selectedProvince]?.[selectedDistrict] ?? [])
-  : selectedProvince !== 'all'
-    ? Object.values(locationMap[selectedProvince] || {}).flat().filter((v,i,a) => a.indexOf(v)===i).sort((a,b) => a-b)
-    : [];
+// Areas: cascade from district (search across all provinces if province not selected)
+let uniqueAreas: number[] = [];
+if (selectedDistrict !== 'all') {
+  // Find areas for this district across all provinces
+  for (const prov of Object.keys(locationMap)) {
+    if (locationMap[prov][selectedDistrict]) {
+      uniqueAreas = locationMap[prov][selectedDistrict];
+      break;
+    }
+  }
+} else if (selectedProvince !== 'all') {
+  uniqueAreas = Object.values(locationMap[selectedProvince] || {}).flat().filter((v: number,i: number,a: number[]) => a.indexOf(v)===i).sort((a: number,b: number) => a-b);
+}
 
 // ── Helpers ─────────────────────────────────────────────────
 function partyColor(party: string) {
@@ -106,6 +228,12 @@ function partyColor(party: string) {
     "स्वतन्त्र": "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700",
   };
   return m[party] || "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700";
+}
+
+function getVoteInfo(candidateId: number) {
+  const v = voteMap[candidateId];
+  if (!v || v.votes === 0) return null;
+  return v;
 }
 
 function shortParty(p: string) {
@@ -170,7 +298,7 @@ function pageUrl(p: number) {
           <div class="flex-1 min-w-[200px] relative">
             <input type="text" id="searchInput" name="search"
               class="w-full border border-input rounded-md px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-blue-500 outline-none pr-10"
-              placeholder="🔍 Search name (नाम खोज्नुहोस्)…" value={searchQuery}
+              placeholder="🔍 Search (name in English or नेपाली)…" value={searchQuery}
               autocomplete="off"
             />
             {searchQuery && (
@@ -297,7 +425,37 @@ function pageUrl(p: number) {
                       </div>
                     </div>
 
-                    <div class="mt-3 pt-2 border-t border-border flex justify-end">
+                    {/* ── Vote data section ── */}
+                    {(() => {
+                      const vi = getVoteInfo(c.candidate_id);
+                      if (!vi) return (
+                        <div class="mt-2 pt-2 border-t border-border">
+                          <div class="flex items-center justify-between">
+                            <span class="text-[11px] text-muted-foreground italic">No vote data yet</span>
+                          </div>
+                        </div>
+                      );
+                      const statusBadge = vi.status === 'won'
+                        ? <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border border-green-200 dark:border-green-800">🏆 Winner</span>
+                        : vi.status === 'leading'
+                        ? <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-200 dark:border-blue-800">↑ Leading</span>
+                        : vi.status === 'runner-up'
+                        ? <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800">② Runner-up</span>
+                        : <span class="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground">Counting</span>;
+                      return (
+                        <div class="mt-2 pt-2 border-t border-border">
+                          <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-1.5">
+                              <span class="text-sm font-bold text-foreground font-mono">{vi.votes.toLocaleString()}</span>
+                              <span class="text-[10px] text-muted-foreground">votes</span>
+                            </div>
+                            {statusBadge}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    <div class="mt-2 pt-2 border-t border-border flex justify-end">
                       <span class="text-xs text-blue-500 font-semibold group-hover:text-blue-700 transition-colors">View Details →</span>
                     </div>
                   </div>
@@ -351,12 +509,13 @@ function pageUrl(p: number) {
       });
 
       // ── Cascade helpers ──
+      // Show province-specific districts when province selected, all districts otherwise
       function rebuildDistricts(province, keepDistrict) {
         var sel = document.getElementById('districtSelect');
         sel.innerHTML = '<option value="all">All Districts</option>';
-        var dists = province === 'all'
-          ? Object.values(LOC).flatMap(function(d) { return Object.keys(d); }).filter(function(v,i,a) { return a.indexOf(v)===i; }).sort()
-          : Object.keys(LOC[province] || {}).sort();
+        var dists = province !== 'all'
+          ? Object.keys(LOC[province] || {}).sort()
+          : Object.values(LOC).flatMap(function(d) { return Object.keys(d); }).filter(function(v,i,a) { return a.indexOf(v)===i; }).sort();
         dists.forEach(function(d) {
           var opt = document.createElement('option');
           opt.value = d; opt.textContent = d;
@@ -369,10 +528,8 @@ function pageUrl(p: number) {
         var sel = document.getElementById('areaSelect');
         sel.innerHTML = '<option value="all">All Areas</option>';
         var areas = [];
-        if (district !== 'all' && province !== 'all') {
-          areas = (LOC[province] || {})[district] || [];
-        } else if (district !== 'all') {
-          // find province for this district
+        if (district !== 'all') {
+          // Find areas for this district across all provinces
           for (var p in LOC) { if (LOC[p][district]) { areas = LOC[p][district]; break; } }
         } else if (province !== 'all') {
           var seen = {};
