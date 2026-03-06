@@ -99,68 +99,98 @@ function shortParty(p: string) {
   return p.length > 18 ? p.slice(0, 16) + '…' : p;
 }
 
-// ── Featured Constituencies ─────────────────────────────────
-// Hard-coded matchups as requested by user
-const featuredMatchups = [
-  {
-    label: 'झापा - क्षेत्र 5',
-    tag: '🔥 Hot Seat',
-    candidates: [
-      { id: 339653, name: 'वालेन्द्र शाह (बालेन)', short: 'बालेन' },
-      { id: 340111, name: 'के.पी शर्मा ओली', short: 'के.पी ओली' },
-    ]
-  },
-  {
-    label: 'सर्लाही - क्षेत्र 4',
-    tag: '🔥 Key Battle',
-    candidates: [
-      { id: 341549, name: 'गगन कुमार थापा', short: 'गगन थापा' },
-      { id: 340974, name: 'अमरेश कुमार सिह', short: 'अमरेश कुमार' },
-    ]
-  },
-  {
-    label: 'काठमाडौं - क्षेत्र 5',
-    tag: '⭐ Capital Fight',
-    candidates: [
-      { id: 340646, name: 'प्रदीप पौडेल', short: 'प्रदीप पौडेल' },
-      { id: 340085, name: 'इश्वर पोखरेल', short: 'ईश्वर पोखरेल' },
-    ]
-  },
-  {
-    label: 'काठमाडौं - क्षेत्र 1',
-    tag: '⭐ Capital Clash',
-    candidates: [
-      { id: 0, name: 'रवीन्द्र मिश्र', short: 'रवीन्द्र मिश्र' },
-      { id: 0, name: 'प्रबल थापा', short: 'प्रबल थापा' },
-    ]
-  },
-  {
-    label: 'सुनसरी - क्षेत्र 1',
-    tag: '🗳️ Close Race',
-    candidates: [
-      { id: 0, name: 'हर्क साम्पाङ', short: 'हर्क साम्पाङ' },
-      { id: 0, name: 'गोमा तामाङ', short: 'गोमा तामाङ' },
-    ]
-  },
-  {
-    label: 'रुकुम पूर्व - क्षेत्र 1',
-    tag: '🔥 PM Race',
-    candidates: [
-      { id: 0, name: 'पुष्पकमल दाहाल (प्रचण्ड)', short: 'प्रचण्ड' },
-      { id: 0, name: 'लीलामणि गौतम', short: 'लीलामणि गौतम' },
-    ]
-  },
-];
+// ── Featured Constituencies (LIVE from HamroPatro) ──────────
+interface FeaturedConstituency {
+  label: string;
+  labelEn: string;
+  tag: string;
+  totalVoters: number;
+  totalCounted: number;
+  countedPct: number;
+  status: string;
+  candidates: { id: number; name: string; nameEn: string; party: string; votes: number; isWinner: boolean; isLeading: boolean }[];
+}
 
-// Find actual candidate_ids from DB for matchups with id=0
-featuredMatchups.forEach(m => {
-  m.candidates.forEach(c => {
-    if (!c.id) {
-      const found = allCandidates.find(ac => ac.name && ac.name.includes(c.short.split(' ')[0]));
-      if (found) c.id = found.candidate_id;
+let featuredConstituencies: FeaturedConstituency[] = [];
+
+try {
+  // Step 1: Get all areas
+  const areasRes = await fetch('https://keyvalue.hamropatro.com/kv/get/major-election-2082-areas::-1');
+  if (areasRes.ok) {
+    const areasJson = await areasRes.json();
+    const areas = JSON.parse(areasJson.list[0].value);
+    const areaIds = areas.map((a: any) => a.id);
+
+    // Step 2: Batch fetch area results in chunks of 30 (URL too long for all 165 at once)
+    const CHUNK_SIZE = 30;
+    const allBatchItems: any[] = [];
+    for (let i = 0; i < areaIds.length; i += CHUNK_SIZE) {
+      const chunk = areaIds.slice(i, i + CHUNK_SIZE);
+      const batchKeys = chunk.map((id: string) => `major-election-2082-areas-${id}-result::-1`).join('::');
+      const batchRes = await fetch(`https://keyvalue.hamropatro.com/kv/get/${batchKeys}`);
+      if (batchRes.ok) {
+        const batchJson = await batchRes.json();
+        allBatchItems.push(...batchJson.list);
+      }
     }
-  });
-});
+
+    const allResults: any[] = [];
+    allBatchItems.forEach((item: any) => {
+      try {
+        const r = JSON.parse(item.value);
+        if (r.candidateResults && r.candidateResults.length > 0 && r.totalCountedVotes > 0) {
+          allResults.push(r);
+        }
+      } catch (e) {}
+    });
+
+    // Sort by total counted votes (most active constituencies first)
+    allResults.sort((a, b) => (b.totalCountedVotes || 0) - (a.totalCountedVotes || 0));
+
+    // Take top 6 constituencies
+    const top6 = allResults.slice(0, 6);
+
+    featuredConstituencies = top6.map((r: any) => {
+      const sorted = [...r.candidateResults].sort((a: any, b: any) => (b.votes || 0) - (a.votes || 0));
+      const top2 = sorted.slice(0, 2);
+      const totalVoters = r.registeredVoters || 0;
+      const totalCounted = r.totalCountedVotes || 0;
+      const countedPct = totalVoters > 0 ? Math.round((totalCounted / totalVoters) * 100) : 0;
+      const isDeclared = r.electionResultStatus === 'RESULT_ANNOUNCED';
+
+      let tag = '🗳️ Counting';
+      if (isDeclared) tag = '✅ Result Declared';
+      else if (countedPct >= 80) tag = '🔥 Almost Final';
+      else if (top2.length >= 2 && top2[0].votes > 0 && top2[1].votes > 0) {
+        const margin = top2[0].votes - top2[1].votes;
+        const marginPct = top2[0].votes > 0 ? (margin / top2[0].votes) * 100 : 0;
+        if (marginPct < 5) tag = '⚡ Tight Race';
+        else if (marginPct < 15) tag = '🔥 Close Fight';
+      }
+
+      return {
+        label: `${r.districtName || ''} ${r.areaName || ''}`.trim(),
+        labelEn: `${r.districtEnglishName || ''} ${r.areaNameEnglish || ''}`.trim(),
+        tag,
+        totalVoters,
+        totalCounted,
+        countedPct,
+        status: isDeclared ? 'declared' : 'counting',
+        candidates: top2.map((c: any) => ({
+          id: Number(c.candidateId) || 0,
+          name: c.name || '',
+          nameEn: c.englishName || '',
+          party: c.partyName || '',
+          votes: c.votes || 0,
+          isWinner: c.winner || false,
+          isLeading: sorted.indexOf(c) === 0 && (c.votes || 0) > 0,
+        })),
+      };
+    });
+  }
+} catch (e) {
+  console.error('[dashboard] Featured constituencies fetch failed:', e);
+}
 ---
 
 <html lang="ne">
@@ -294,62 +324,102 @@ featuredMatchups.forEach(m => {
         </div>
       </div>
 
-      <!-- ══════════ ROW 3: Featured Constituencies ══════════ -->
+      <!-- ══════════ ROW 3: Live Constituency Results ══════════ -->
       <div class="mb-8">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-xl font-bold text-foreground">🗳️ Featured Constituencies</h2>
-          <a href="/candidates" class="text-blue-600 text-sm font-medium hover:underline">View all candidates →</a>
+          <h2 class="text-xl font-bold text-foreground">🗳️ Live Constituency Results</h2>
+          <a href="/result" class="text-blue-600 text-sm font-medium hover:underline">View all results →</a>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {featuredMatchups.map(matchup => (
-            <div class="bg-card border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
-              <!-- Location + tag -->
-              <div class="flex items-center justify-between mb-4">
-                <div class="flex items-center gap-2">
-                  <span class="text-blue-600 dark:text-blue-400">📍</span>
-                  <span class="font-semibold text-sm text-foreground">{matchup.label}</span>
-                </div>
-                <span class="text-xs px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 font-medium">
-                  {matchup.tag}
-                </span>
-              </div>
+        {featuredConstituencies.length === 0 ? (
+          <div class="text-center py-12 bg-card border border-border rounded-xl text-muted-foreground">
+            <p class="text-sm">Live constituency results loading...</p>
+          </div>
+        ) : (
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {featuredConstituencies.map(fc => {
+              const tagColor = fc.tag.includes('Declared') || fc.tag.includes('✅')
+                ? 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 border-green-200 dark:border-green-800'
+                : fc.tag.includes('Tight') || fc.tag.includes('⚡')
+                ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800'
+                : 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800';
 
-              <!-- VS card -->
-              <div class="flex items-center justify-between gap-2">
-                {matchup.candidates.map((c, i) => {
-                  const photoUrl = c.id
-                    ? `https://election.gov.np/2082/uploads/images/candidates/${c.id}.jpg`
-                    : null;
-                  return (
-                    <div class="flex-1 text-center">
-                      <!-- Photo -->
-                      <div class="relative h-16 w-16 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden border-2 border-slate-200 dark:border-slate-700 mb-2">
-                        <div class="absolute inset-0 flex items-center justify-center text-slate-400 dark:text-slate-500 font-bold text-lg">
-                          {c.name.charAt(0)}
-                        </div>
-                        {photoUrl && (
-                          <img
-                            src={photoUrl}
-                            alt={c.name}
-                            class="featured-photo absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-300"
-                            loading="lazy"
-                          />
-                        )}
-                      </div>
-                      <p class="text-xs font-semibold text-foreground leading-tight">{c.short}</p>
+              return (
+                <div class="bg-card border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+                  {/* Header: Location + tag */}
+                  <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                      <span class="text-blue-600 dark:text-blue-400">📍</span>
+                      <span class="font-semibold text-sm text-foreground">{fc.label}</span>
                     </div>
-                  );
-                })}
-              </div>
+                    <span class={`text-[10px] px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${tagColor}`}>
+                      {fc.tag}
+                    </span>
+                  </div>
 
-              <!-- VS divider was implicit -->
-              <div class="text-center my-1">
-                <span class="text-xs font-bold text-muted-foreground bg-secondary px-3 py-0.5 rounded-full">VS</span>
-              </div>
-            </div>
-          ))}
-        </div>
+                  {/* Counted progress */}
+                  <div class="mb-3">
+                    <div class="flex justify-between text-[10px] text-muted-foreground mb-1">
+                      <span>{fc.totalCounted.toLocaleString()} counted</span>
+                      <span>{fc.countedPct}%</span>
+                    </div>
+                    <div class="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
+                      <div class="h-full bg-blue-500 rounded-full transition-all" style={`width: ${Math.min(fc.countedPct, 100)}%`}></div>
+                    </div>
+                  </div>
+
+                  {/* Top 2 Candidates */}
+                  <div class="space-y-2.5">
+                    {fc.candidates.map((c, i) => {
+                      const maxVotes = fc.candidates[0]?.votes || 1;
+                      const barPct = maxVotes > 0 ? Math.round((c.votes / maxVotes) * 100) : 0;
+                      const photoUrl = c.id ? `https://file-r2.hamropatro.com/election-images/2082/candidates/${c.id}.jpg` : null;
+                      const barColor = i === 0
+                        ? (c.isWinner ? 'bg-green-500' : 'bg-blue-500')
+                        : 'bg-slate-400 dark:bg-slate-600';
+
+                      return (
+                        <div class="flex items-center gap-2.5">
+                          {/* Photo */}
+                          <div class="relative h-10 w-10 flex-shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden border border-slate-200 dark:border-slate-700">
+                            <div class="absolute inset-0 flex items-center justify-center text-slate-400 dark:text-slate-500 font-bold text-xs">
+                              {c.name.charAt(0)}
+                            </div>
+                            {photoUrl && (
+                              <img
+                                src={photoUrl}
+                                alt={c.name}
+                                class="featured-photo absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-300"
+                                loading="lazy"
+                              />
+                            )}
+                          </div>
+
+                          {/* Info */}
+                          <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-1.5">
+                              <span class="text-xs font-semibold text-foreground truncate">{c.name}</span>
+                              {c.isWinner && <span class="text-[9px] px-1.5 py-0 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 font-bold border border-green-200 dark:border-green-800 flex-shrink-0">🏆</span>}
+                              {!c.isWinner && c.isLeading && <span class="text-[9px] px-1.5 py-0 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-bold border border-blue-200 dark:border-blue-800 flex-shrink-0">↑</span>}
+                            </div>
+                            <div class="text-[10px] text-muted-foreground truncate">{shortParty(c.party)}</div>
+                            {/* Vote bar */}
+                            <div class="flex items-center gap-2 mt-0.5">
+                              <div class="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
+                                <div class={`h-full rounded-full transition-all ${barColor}`} style={`width: ${barPct}%`}></div>
+                              </div>
+                              <span class="text-[10px] font-bold text-foreground font-mono whitespace-nowrap">{c.votes.toLocaleString()}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <!-- ══════════ CTA: See All Candidates ══════════ -->

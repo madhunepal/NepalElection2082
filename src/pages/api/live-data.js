@@ -20,18 +20,25 @@ export async function GET() {
             const areas = JSON.parse(areasJson.list[0].value);
             const areaIds = areas.map(a => a.id);
 
-            // Step 2: Batch fetch all area results
-            const batchKeys = areaIds.map(id => `major-election-2082-areas-${id}-result::-1`).join('::');
-            const batchRes = await fetch(`https://keyvalue.hamropatro.com/kv/get/${batchKeys}`);
-            if (!batchRes.ok) throw new Error('Batch results fetch failed');
-            const batchJson = await batchRes.json();
+            // Step 2: Batch fetch area results in chunks of 30 (URL limit)
+            const CHUNK_SIZE = 30;
+            const allBatchItems = [];
+            for (let i = 0; i < areaIds.length; i += CHUNK_SIZE) {
+                const chunk = areaIds.slice(i, i + CHUNK_SIZE);
+                const batchKeys = chunk.map(id => `major-election-2082-areas-${id}-result::-1`).join('::');
+                const batchRes = await fetch(`https://keyvalue.hamropatro.com/kv/get/${batchKeys}`);
+                if (batchRes.ok) {
+                    const batchJson = await batchRes.json();
+                    allBatchItems.push(...batchJson.list);
+                }
+            }
 
             // Step 3: Transform to NepalVotes-compatible format for result.astro
             hpConstituencies = [];
             const areaMap = {};
             areas.forEach(a => { areaMap[a.id] = a; });
 
-            batchJson.list.forEach(item => {
+            allBatchItems.forEach(item => {
                 try {
                     const result = JSON.parse(item.value);
                     const area = areaMap[result.areaId] || {};
@@ -43,8 +50,8 @@ export async function GET() {
                         district: result.districtName || '',
                         districtEn: result.districtEnglishName || '',
                         totalVoters: result.registeredVoters || area.registeredVoters || 0,
-                        totalCastVotes: result.totalCountedVotes || area.totalCastVotes || 0,
-                        status: result.electionResultStatus === 'RESULT_ANNOUNCED' ? 'DECLARED' : 'COUNTING',
+                        votesCast: result.totalCountedVotes || area.totalCastVotes || 0,
+                        status: result.electionResultStatus === 'RESULT_ANNOUNCED' ? 'COMPLETED' : 'COUNTING',
                         candidates: (result.candidateResults || []).map(c => ({
                             candidateId: Number(c.candidateId),
                             name: c.englishName || '',

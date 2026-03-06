@@ -97,14 +97,21 @@ async function fetchLiveVoteData(): Promise<Record<number, { votes: number; rank
     const areas = JSON.parse(areasJson.list[0].value);
     const areaIds = areas.map((a: any) => a.id);
 
-    // Step 2: Batch fetch all area results in one request
-    const batchKeys = areaIds.map((id: string) => `major-election-2082-areas-${id}-result::-1`).join('::');
-    const batchRes = await fetch(`https://keyvalue.hamropatro.com/kv/get/${batchKeys}`);
-    if (!batchRes.ok) throw new Error('Batch results fetch failed');
-    const batchJson = await batchRes.json();
+    // Step 2: Batch fetch area results in chunks of 30 (URL limit)
+    const CHUNK_SIZE = 30;
+    const allBatchItems: any[] = [];
+    for (let i = 0; i < areaIds.length; i += CHUNK_SIZE) {
+      const chunk = areaIds.slice(i, i + CHUNK_SIZE);
+      const batchKeys = chunk.map((id: string) => `major-election-2082-areas-${id}-result::-1`).join('::');
+      const batchRes = await fetch(`https://keyvalue.hamropatro.com/kv/get/${batchKeys}`);
+      if (batchRes.ok) {
+        const batchJson = await batchRes.json();
+        allBatchItems.push(...batchJson.list);
+      }
+    }
 
     // Step 3: Parse each area result
-    batchJson.list.forEach((item: any) => {
+    allBatchItems.forEach((item: any) => {
       try {
         const areaResult = JSON.parse(item.value);
         if (!areaResult.candidateResults || areaResult.candidateResults.length === 0) return;
