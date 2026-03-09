@@ -175,27 +175,39 @@ const fptpSeatsData = Object.entries(fptpPartyMap)
   .filter(p => p.value > 0)
   .sort((a,b) => b.value - a.value);
 
-// ── PR Seats Data ───────────────────────────────────────────
-let prSeatsData: {name: string, value: number}[] = [];
+// ── PR Votes Data ───────────────────────────────────────────
+let prSeatsData: {name: string, value: number, percentage?: number}[] = [];
 try {
   const prRes = await fetch('https://pub-4173e04d0b78426caa8cfa525f827daa.r2.dev/pr_parties.json');
   if (prRes.ok) {
     const prJson = await prRes.json();
     const allParties = prJson.parties || [];
-    const totalEst = allParties.reduce((sum, p) => sum + (p.estimatedSeats || 0), 0);
+    const totalVotes = allParties.reduce((sum, p) => sum + (p.prVotes || 0), 0);
 
-    if (totalEst > 0) {
-      // Use estimated seats if they have started being allocated
-      prSeatsData = allParties
-        .filter((p) => p.estimatedSeats > 0)
-        .map((p) => ({ name: p.partyName, value: p.estimatedSeats }));
-    } else {
-      // Fallback to top parties by raw votes to show live progress
-      prSeatsData = allParties
-        .filter((p) => p.votes > 0)
-        .sort((a, b) => b.votes - a.votes)
-        .slice(0, 10) // Top 10 taking lead
-        .map((p) => ({ name: p.partyName, value: p.votes }));
+    if (totalVotes > 0) {
+      let otherVotes = 0;
+      
+      const filteredParties = allParties.reduce((acc, p) => {
+        const pVotes = p.prVotes || 0;
+        const percentage = (pVotes / totalVotes) * 100;
+        
+        if (percentage >= 2) {
+          acc.push({ name: p.partyName, value: pVotes, percentage: Number(percentage.toFixed(2)) });
+        } else {
+          otherVotes += pVotes;
+        }
+        return acc;
+      }, []);
+
+      // Sort major parties
+      filteredParties.sort((a, b) => b.value - a.value);
+
+      // Add 'Other' if it exists
+      if (otherVotes > 0) {
+        filteredParties.push({ name: 'अन्य', value: otherVotes, percentage: Number(((otherVotes / totalVotes) * 100).toFixed(2)) });
+      }
+
+      prSeatsData = filteredParties;
     }
   }
 } catch (e) {
@@ -323,7 +335,7 @@ try {
           <!-- PR Seats Chart -->
           <div class="bg-card border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
             <h3 class="font-semibold text-foreground text-base mb-1">Proportional Representation (PR)</h3>
-            <p class="text-xs text-muted-foreground mb-4">समानुपातिक तर्फ सिट / मत (११० सिट)</p>
+            <p class="text-xs text-muted-foreground mb-4">समानुपातिक तर्फ कुल मत प्रतिशत (११० सिट)</p>
             <div class="h-64 relative">
               <canvas id="prChart"></canvas>
             </div>
@@ -563,7 +575,11 @@ try {
                 legend: { position: 'right', labels: { color: getTextColor(), boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
                 tooltip: {
                   callbacks: {
-                    label: function(ctx) { return safePr.length > 0 ? ' ' + ctx.raw.toLocaleString() + ' Seats/Votes' : ' 0 Seats'; }
+                    label: function(ctx) {
+                      var dataObj = safePr[ctx.dataIndex];
+                      if (!dataObj || !dataObj.percentage) return ' ' + ctx.raw.toLocaleString() + ' Votes';
+                      return ' ' + ctx.raw.toLocaleString() + ' (' + dataObj.percentage + '%)';
+                    }
                   }
                 }
               }
