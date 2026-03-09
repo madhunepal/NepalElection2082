@@ -99,15 +99,81 @@ function shortParty(p: string) {
   return p.length > 18 ? p.slice(0, 16) + '…' : p;
 }
 
-// ── FPTP Seats Data ─────────────────────────────────────────
+// ── FPTP Seats Data (Won + Leading) ───────────────────────
 const { data: fptpData } = await supabase
   .from('party_summary')
   .select('party_name, fptp_won')
   .order('fptp_won', { ascending: false });
 
-const fptpSeatsData = (fptpData || [])
-  .filter(p => p.fptp_won > 0)
-  .map(p => ({ name: p.party_name, value: p.fptp_won }));
+let fptpPartyMap: Record<string, { won: number, leading: number }> = {};
+if (fptpData) {
+  fptpData.forEach(p => {
+    fptpPartyMap[p.party_name] = { won: p.fptp_won, leading: 0 };
+  });
+}
+
+try {
+  // Step 1: Get all areas
+  const areasRes = await fetch('https://keyvalue.hamropatro.com/kv/get/major-election-2082-areas::-1');
+  if (areasRes.ok) {
+    const areasJson = await areasRes.json();
+    const areas = JSON.parse(areasJson.list[0].value);
+    const areaIds = areas.map((a: any) => a.id);
+
+    // Step 2: Batch fetch area results in chunks of 30
+    const CHUNK_SIZE = 30;
+    const allBatchItems: any[] = [];
+    for (let i = 0; i < areaIds.length; i += CHUNK_SIZE) {
+      const chunk = areaIds.slice(i, i + CHUNK_SIZE);
+      const batchKeys = chunk.map((id: string) => `major-election-2082-areas-${id}-result::-1`).join('::');
+      const batchRes = await fetch(`https://keyvalue.hamropatro.com/kv/get/${batchKeys}`);
+      if (batchRes.ok) {
+        const batchJson = await batchRes.json();
+        allBatchItems.push(...batchJson.list);
+      }
+    }
+
+    const allResults: any[] = [];
+    allBatchItems.forEach((item: any) => {
+      try {
+        const r = JSON.parse(item.value);
+        if (r.candidateResults && r.candidateResults.length > 0) {
+          allResults.push(r);
+        }
+      } catch (e) {}
+    });
+
+    // Step 3: Count leading candidates
+    allResults.forEach((c) => {
+      if (!c.candidateResults || c.candidateResults.length === 0) return;
+
+      // Add declared winners first
+      c.candidateResults.forEach(cand => {
+        if (cand.winner) {
+          const pName = cand.partyName || 'Independent';
+          if (!fptpPartyMap[pName]) fptpPartyMap[pName] = { won: 0, leading: 0 };
+          fptpPartyMap[pName].won += 1;
+        }
+      });
+
+      const sorted = [...c.candidateResults].sort((a, b) => (b.votes || 0) - (a.votes || 0));
+      const leader = sorted[0];
+
+      if (leader && leader.votes > 0 && !leader.winner) {
+        const pName = leader.partyName || 'Independent';
+        if (!fptpPartyMap[pName]) fptpPartyMap[pName] = { won: 0, leading: 0 };
+        fptpPartyMap[pName].leading += 1;
+      }
+    });
+  }
+} catch (e) {
+  console.error('[dashboard] live leading fetch failed:', e);
+}
+
+const fptpSeatsData = Object.entries(fptpPartyMap)
+  .map(([name, counts]) => ({ name, value: counts.won + counts.leading }))
+  .filter(p => p.value > 0)
+  .sort((a,b) => b.value - a.value);
 
 // ── PR Seats Data ───────────────────────────────────────────
 let prSeatsData: {name: string, value: number}[] = [];
@@ -115,9 +181,22 @@ try {
   const prRes = await fetch('https://pub-4173e04d0b78426caa8cfa525f827daa.r2.dev/pr_parties.json');
   if (prRes.ok) {
     const prJson = await prRes.json();
-    prSeatsData = (prJson.parties || [])
-      .filter((p: any) => p.estimatedSeats > 0)
-      .map((p: any) => ({ name: p.partyName, value: p.estimatedSeats }));
+    const allParties = prJson.parties || [];
+    const totalEst = allParties.reduce((sum, p) => sum + (p.estimatedSeats || 0), 0);
+
+    if (totalEst > 0) {
+      // Use estimated seats if they have started being allocated
+      prSeatsData = allParties
+        .filter((p) => p.estimatedSeats > 0)
+        .map((p) => ({ name: p.partyName, value: p.estimatedSeats }));
+    } else {
+      // Fallback to top parties by raw votes to show live progress
+      prSeatsData = allParties
+        .filter((p) => p.votes > 0)
+        .sort((a, b) => b.votes - a.votes)
+        .slice(0, 10) // Top 10 taking lead
+        .map((p) => ({ name: p.partyName, value: p.votes }));
+    }
   }
 } catch (e) {
   console.error('[dashboard] PR fetch failed:', e);
@@ -224,7 +303,35 @@ try {
         </div>
       </div>
 
-      <!-- ══════════ ROW 2: Charts ══════════ -->
+      <!-- ══════════ ROW 2: FPTP and PR Seats Overview ══════════ -->
+      <div class="mb-10">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-bold text-foreground">🏆 Seats Overview</h2>
+          <a href="/result" class="text-blue-600 text-sm font-medium hover:underline">Detailed Results →</a>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <!-- FPTP Seats Chart -->
+          <div class="bg-card border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+            <h3 class="font-semibold text-foreground text-base mb-1">Direct Election (FPTP)</h3>
+            <p class="text-xs text-muted-foreground mb-4">प्रत्यक्ष तर्फ निर्वाचित / अग्रता (१६५ सिट)</p>
+            <div class="h-64 relative">
+              <canvas id="fptpChart"></canvas>
+            </div>
+          </div>
+
+          <!-- PR Seats Chart -->
+          <div class="bg-card border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+            <h3 class="font-semibold text-foreground text-base mb-1">Proportional Representation (PR)</h3>
+            <p class="text-xs text-muted-foreground mb-4">समानुपातिक तर्फ सिट / मत (११० सिट)</p>
+            <div class="h-64 relative">
+              <canvas id="prChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ ROW 3: Charts ══════════ -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
 
         <!-- Education Pie Chart -->
@@ -255,34 +362,6 @@ try {
         </div>
       </div>
 
-      <!-- ══════════ ROW 3: FPTP and PR Seats Overview ══════════ -->
-      <div class="mb-10">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-xl font-bold text-foreground">🏆 Seats Overview</h2>
-          <a href="/result" class="text-blue-600 text-sm font-medium hover:underline">Detailed Results →</a>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <!-- FPTP Seats Chart -->
-          <div class="bg-card border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
-            <h3 class="font-semibold text-foreground text-base mb-1">Direct Election (FPTP)</h3>
-            <p class="text-xs text-muted-foreground mb-4">प्रत्यक्ष तर्फ निर्वाचित (१६५ सिट)</p>
-            <div class="h-64 relative">
-              <canvas id="fptpChart"></canvas>
-            </div>
-          </div>
-
-          <!-- PR Seats Chart -->
-          <div class="bg-card border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
-            <h3 class="font-semibold text-foreground text-base mb-1">Proportional Representation (PR)</h3>
-            <p class="text-xs text-muted-foreground mb-4">समानुपातिक तर्फ सिट (११० सिट)</p>
-            <div class="h-64 relative">
-              <canvas id="prChart"></canvas>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- ══════════ CTA: See All Candidates ══════════ -->
       <div class="text-center py-8 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 border border-blue-200 dark:border-blue-900/50 rounded-2xl mb-8">
         <h3 class="text-xl font-bold text-foreground mb-2">सबै उम्मेदवारहरू हेर्नुहोस्</h3>
@@ -294,10 +373,17 @@ try {
 
     </main>
 
-    <Footer />
-
     <script is:inline define:vars={{ eduData, genderData, partyChartData, totalCandidates, fptpSeatsData, prSeatsData }}>
       document.addEventListener('DOMContentLoaded', function() {
+        console.log("Raw FPTP Data:", fptpSeatsData);
+        console.log("Raw PR Data:", prSeatsData);
+
+        // Safe parsers for Astro define:vars
+        var safeFptp = [];
+        var safePr = [];
+        try { safeFptp = typeof fptpSeatsData === 'string' ? JSON.parse(fptpSeatsData) : (fptpSeatsData || []); } catch(e){}
+        try { safePr = typeof prSeatsData === 'string' ? JSON.parse(prSeatsData) : (prSeatsData || []); } catch(e){}
+
         var COLORS = [
           '#3b82f6','#ef4444','#22c55e','#f59e0b','#8b5cf6',
           '#06b6d4','#f97316','#64748b','#ec4899','#14b8a6'
@@ -425,63 +511,65 @@ try {
         // ── FPTP Seats Doughnut ──
         var fptpCtx = document.getElementById('fptpChart');
         if (fptpCtx) {
-          var fptpArr = (typeof fptpSeatsData === 'string') ? JSON.parse(fptpSeatsData) : (fptpSeatsData || []);
-          if (fptpArr.length > 0) {
-            var fptpChart = new Chart(fptpCtx, {
-              type: 'doughnut',
-              data: {
-                labels: fptpArr.map(function(d){return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);}),
-                datasets: [{
-                  data: fptpArr.map(function(d){return d.value;}),
-                  backgroundColor: COLORS,
-                  borderColor: '#fff', borderWidth: 2
-                }]
-              },
-              options: {
-                responsive: true, maintainAspectRatio: false, cutout: '65%',
-                plugins: {
-                  legend: { position: 'right', labels: { color: getTextColor(), boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
-                  tooltip: {
-                    callbacks: {
-                      label: function(ctx) { return ' ' + ctx.raw + ' Seats'; }
-                    }
+          var fptpLabels = safeFptp.length > 0 ? safeFptp.map(function(d){return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);}) : ['Yet to start'];
+          var fptpData = safeFptp.length > 0 ? safeFptp.map(function(d){return d.value;}) : [1];
+          var fptpColors = safeFptp.length > 0 ? COLORS : ['#e2e8f0']; // gray-200
+
+          var fptpChart = new Chart(fptpCtx, {
+            type: 'doughnut',
+            data: {
+              labels: fptpLabels,
+              datasets: [{
+                data: fptpData,
+                backgroundColor: fptpColors,
+                borderColor: '#fff', borderWidth: 2
+              }]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false, cutout: '65%',
+              plugins: {
+                legend: { position: 'right', labels: { color: getTextColor(), boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
+                tooltip: {
+                  callbacks: {
+                    label: function(ctx) { return safeFptp.length > 0 ? ' ' + ctx.raw + ' Seats' : ' 0 Seats'; }
                   }
                 }
               }
-            });
-            charts.push(fptpChart);
-          }
+            }
+          });
+          charts.push(fptpChart);
         }
 
         // ── PR Seats Doughnut ──
         var prCtx = document.getElementById('prChart');
         if (prCtx) {
-          var prArr = (typeof prSeatsData === 'string') ? JSON.parse(prSeatsData) : (prSeatsData || []);
-          if (prArr.length > 0) {
-            var prChart = new Chart(prCtx, {
-              type: 'doughnut',
-              data: {
-                labels: prArr.map(function(d){return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);}),
-                datasets: [{
-                  data: prArr.map(function(d){return d.value;}),
-                  backgroundColor: COLORS,
-                  borderColor: '#fff', borderWidth: 2
-                }]
-              },
-              options: {
-                responsive: true, maintainAspectRatio: false, cutout: '65%',
-                plugins: {
-                  legend: { position: 'right', labels: { color: getTextColor(), boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
-                  tooltip: {
-                    callbacks: {
-                      label: function(ctx) { return ' ' + ctx.raw + ' Seats'; }
-                    }
+          var prLabels = safePr.length > 0 ? safePr.map(function(d){return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);}) : ['Yet to start'];
+          var prData = safePr.length > 0 ? safePr.map(function(d){return d.value;}) : [1];
+          var prColors = safePr.length > 0 ? COLORS : ['#e2e8f0']; // gray-200
+
+          var prChart = new Chart(prCtx, {
+            type: 'doughnut',
+            data: {
+              labels: prLabels,
+              datasets: [{
+                data: prData,
+                backgroundColor: prColors,
+                borderColor: '#fff', borderWidth: 2
+              }]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false, cutout: '65%',
+              plugins: {
+                legend: { position: 'right', labels: { color: getTextColor(), boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
+                tooltip: {
+                  callbacks: {
+                    label: function(ctx) { return safePr.length > 0 ? ' ' + ctx.raw.toLocaleString() + ' Seats/Votes' : ' 0 Seats'; }
                   }
                 }
               }
-            });
-            charts.push(prChart);
-          }
+            }
+          });
+          charts.push(prChart);
         }
 
         // Apply dark mode overrides dynamically
