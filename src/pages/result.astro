@@ -87,14 +87,14 @@ function getStatusText(status: string) {
       <!-- Main Dashboard Grid -->
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-12">
         
-        <!-- Left Column: Party Leaderboard (Top 5) -->
+        <!-- Left Column: Party Leaderboard (all qualifying parties) -->
         <div class="lg:col-span-5 flex flex-col gap-6">
           <section>
             <div class="flex items-center justify-between mb-4">
               <h2 class="text-2xl font-bold flex items-center gap-2 border-l-4 border-blue-600 pl-3">
                 Party Leaderboard
               </h2>
-              <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary px-2 py-1 rounded">Top 5</span>
+              <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary px-2 py-1 rounded">FPTP Results</span>
             </div>
             
             <div class="flex flex-col gap-4" id="party-leaderboard">
@@ -106,36 +106,10 @@ function getStatusText(status: string) {
               )}
             </div>
           </section>
+        </div>
 
-          <!-- Overall Constituency Progress (Mocked for dashboard feel) -->
-          <section class="bg-card border border-border rounded-2xl p-6 shadow-sm">
-            <h3 class="font-bold text-lg mb-4 flex items-center justify-between">
-              Constituency Progress
-              <span class="text-sm font-normal text-muted-foreground tracking-tight">165 Total FPTP</span>
-            </h3>
-            <div class="space-y-4">
-              <div>
-                <div class="flex justify-between text-sm mb-1">
-                  <span class="font-medium text-green-600 dark:text-green-400">Results Declared (Won)</span>
-                  <span class="font-bold" id="total-won-count">0</span>
-                </div>
-                <div class="w-full bg-secondary rounded-full h-2.5 overflow-hidden">
-                  <div class="bg-green-500 h-2.5 rounded-full transition-all duration-1000 ease-out" id="total-won-bar" style="width: 0%"></div>
-                </div>
-              </div>
-              <div>
-                <div class="flex justify-between text-sm mb-1">
-                  <span class="font-medium text-blue-600 dark:text-blue-400">Counting/Leading</span>
-                  <span class="font-bold" id="total-leading-count">0</span>
-                </div>
-                <div class="w-full bg-secondary rounded-full h-2.5 overflow-hidden">
-                  <div class="bg-blue-500 h-2.5 rounded-full transition-all duration-1000 ease-out" id="total-leading-bar" style="width: 0%"></div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- Proportional Votes (PR) -->
+        <!-- Right Column: Proportional Votes (PR) -->
+        <div class="lg:col-span-7">
           <section class="bg-card border border-border rounded-2xl p-4 sm:p-6 shadow-sm">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-1">
               <h3 class="font-bold text-base sm:text-lg flex items-center gap-2 border-l-4 border-purple-600 pl-3">
@@ -153,22 +127,35 @@ function getStatusText(status: string) {
           </section>
         </div>
 
-        <!-- Right Column: Constituency Results -->
-        <div class="lg:col-span-7">
-          <section>
-            <div class="flex items-center justify-between mb-4">
-              <h2 class="text-2xl font-bold flex items-center gap-2 border-l-4 border-green-600 pl-3">
-                Constituency Results
-              </h2>
-              <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary px-2 py-1 rounded">Top 20</span>
-            </div>
+      </div>
 
-            <div class="flex flex-col gap-3" id="candidates-list-container">
-              <!-- Rendered via JS -->
+      <!-- Full-width: Constituency Results (All 165) -->
+      <div class="mb-12">
+        <section>
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <h2 class="text-2xl font-bold flex items-center gap-2 border-l-4 border-green-600 pl-3">
+              Constituency Results
+            </h2>
+            <div class="flex items-center gap-3">
+              <div class="relative">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4 pointer-events-none">
+                  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                </svg>
+                <input 
+                  type="text" 
+                  id="constituency-search" 
+                  placeholder="Search by candidates or district"
+                  class="pl-9 pr-4 py-2 text-sm bg-card border border-border rounded-lg w-full sm:w-[320px] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-all placeholder:text-muted-foreground/60"
+                />
+              </div>
+              <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-secondary px-2 py-1 rounded whitespace-nowrap" id="constituency-count-badge">All 165 Constituencies</span>
             </div>
-          </section>
-        </div>
+          </div>
 
+          <div class="flex flex-col gap-3" id="candidates-list-container">
+            <!-- Rendered via JS -->
+          </div>
+        </section>
       </div>
 
 
@@ -392,9 +379,12 @@ function getStatusText(status: string) {
 
         setTimeout(() => {
           const parties = Array.isArray(partiesData) ? partiesData : [];
-          const topParties = [...parties].sort((a,b) => 
-            ((b.fptp_won||0) * 1000 + (b.fptp_leading||0)) - ((a.fptp_won||0) * 1000 + (a.fptp_leading||0))
-          ).slice(0, 5);
+          // Show ALL parties with at least 1 won or 1 leading (including independents)
+          const qualifyingParties = [...parties]
+            .filter(p => (p.fptp_won || 0) >= 1 || (p.fptp_leading || 0) >= 1)
+            .sort((a,b) => 
+              ((b.fptp_won||0) * 1000 + (b.fptp_leading||0)) - ((a.fptp_won||0) * 1000 + (a.fptp_leading||0))
+            );
 
           const rankColors = ['bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-500 border-yellow-200 dark:border-yellow-800', 
                               'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700', 
@@ -402,15 +392,10 @@ function getStatusText(status: string) {
                               'bg-secondary text-secondary-foreground border-transparent',
                               'bg-secondary text-secondary-foreground border-transparent'];
 
-          let totalWon = 0;
-          let totalLeading = 0;
-
-          if (topParties.length === 0) {
+          if (qualifyingParties.length === 0) {
             container.innerHTML = '<div class="text-center p-8 bg-card border border-border rounded-2xl"><p class="text-muted-foreground">Waiting for party data...</p></div>';
           } else {
-            container.innerHTML = topParties.map((p, idx) => {
-              totalWon += (p.fptp_won || 0);
-              totalLeading += (p.fptp_leading || 0);
+            container.innerHTML = qualifyingParties.map((p, idx) => {
               return '<div class="bg-card border border-border rounded-2xl p-5 shadow-sm transform transition duration-300 hover:shadow-md relative overflow-hidden flex items-center gap-4">' +
                 '<div class="absolute top-0 left-0 w-1 h-full bg-primary opacity-20"></div>' +
                 '<div class="shrink-0 flex flex-col items-center justify-center w-10">' +
@@ -434,24 +419,6 @@ function getStatusText(status: string) {
               '</div>';
             }).join('');
           }
-
-          // Update progress bars from ALL parties, not just top 5
-          parties.forEach(p => {
-            if (!topParties.includes(p)) {
-              totalWon += (p.fptp_won || 0);
-              totalLeading += (p.fptp_leading || 0);
-            }
-          });
-
-          const wonEl = document.getElementById('total-won-count');
-          const leadEl = document.getElementById('total-leading-count');
-          const wonBar = document.getElementById('total-won-bar');
-          const leadBar = document.getElementById('total-leading-bar');
-
-          if(wonEl) wonEl.innerText = totalWon;
-          if(leadEl) leadEl.innerText = totalLeading;
-          if(wonBar) wonBar.style.width = Math.min((totalWon / 165) * 100, 100) + '%';
-          if(leadBar) leadBar.style.width = Math.min((totalLeading / 165) * 100, 100) + '%';
 
           container.style.opacity = '1';
         }, 300);
@@ -490,7 +457,40 @@ function getStatusText(status: string) {
         return '<span style="background:' + bg + ';color:' + text + '" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ml-1 whitespace-nowrap">' + short + '</span>';
       }
 
-      function renderCandidatesList(constituencies) {
+      // ── Province ordering: East (Koshi) to West (Sudurpashchim) ──
+      var PROVINCE_ORDER = {
+        'कोशी प्रदेश': 1, 'Koshi Province': 1, 'Province 1': 1, 'Koshi': 1,
+        'मधेश प्रदेश': 2, 'Madhesh Province': 2, 'Province 2': 2, 'Madhesh': 2,
+        'बागमती प्रदेश': 3, 'Bagmati Province': 3, 'Province 3': 3, 'Bagmati': 3,
+        'गण्डकी प्रदेश': 4, 'Gandaki Province': 4, 'Province 4': 4, 'Gandaki': 4,
+        'लुम्बिनी प्रदेश': 5, 'Lumbini Province': 5, 'Province 5': 5, 'Lumbini': 5,
+        'कर्णाली प्रदेश': 6, 'Karnali Province': 6, 'Province 6': 6, 'Karnali': 6,
+        'सुदूरपश्चिम प्रदेश': 7, 'Sudurpashchim Province': 7, 'Province 7': 7, 'Sudurpashchim': 7,
+      };
+
+      function getProvinceOrder(provinceName) {
+        if (!provinceName) return 99;
+        // Try exact match first
+        if (PROVINCE_ORDER[provinceName] !== undefined) return PROVINCE_ORDER[provinceName];
+        // Try partial match
+        var keys = Object.keys(PROVINCE_ORDER);
+        for (var i = 0; i < keys.length; i++) {
+          if (provinceName.indexOf(keys[i]) !== -1 || keys[i].indexOf(provinceName) !== -1) {
+            return PROVINCE_ORDER[keys[i]];
+          }
+        }
+        return 99;
+      }
+
+      // ── Store global constituencies for search/filter ──
+      var _allConstituencies = [];
+
+      function renderCandidatesList(constituencies, searchTerm) {
+        // If called with new data (not a search trigger), store it
+        if (constituencies !== null && constituencies !== undefined) {
+          _allConstituencies = Array.isArray(constituencies) ? constituencies : [];
+        }
+
         var container = document.getElementById('candidates-list-container');
         if (!container) return;
         
@@ -498,12 +498,42 @@ function getStatusText(status: string) {
         container.style.transition = 'opacity 0.3s ease';
 
         setTimeout(function() {
-          var items = Array.isArray(constituencies) ? constituencies : [];
+          var items = _allConstituencies;
+          var query = (searchTerm || '').trim().toLowerCase();
 
-          // Sort: constituencies with most votes cast first, show top 20
-          var sorted = items.filter(function(c) { return c.candidates && c.candidates.length > 0; })
-            .sort(function(a, b) { return (b.votesCast || 0) - (a.votesCast || 0); })
-            .slice(0, 20);
+          // Filter by search term (match district, province, or candidate name)
+          var filtered = items.filter(function(c) {
+            if (!c.candidates || c.candidates.length === 0) return false;
+            if (!query) return true;
+            // Match district/province name (in both English and Nepali)
+            var constName = ((c.district || '') + ' ' + (c.districtEn || '') + ' ' + (c.districtNp || '') + ' ' + (c.province || '')).toLowerCase();
+            if (constName.indexOf(query) !== -1) return true;
+            
+            // Match candidate name (in both English and Nepali)
+            for (var i = 0; i < c.candidates.length; i++) {
+              var cand = c.candidates[i];
+              var candName = ((cand.nameNp || '') + ' ' + (cand.name || '') + ' ' + (cand.partyName || '')).toLowerCase();
+              if (candName.indexOf(query) !== -1) return true;
+            }
+            return false;
+          });
+
+          // Sort by Province order (Koshi → Sudurpashchim), then by constituency name
+          var sorted = filtered.sort(function(a, b) {
+            var pa = getProvinceOrder(a.province);
+            var pb = getProvinceOrder(b.province);
+            if (pa !== pb) return pa - pb;
+            // Within same province, sort by constituency name
+            var na = (a.name || a.code || '').toLowerCase();
+            var nb = (b.name || b.code || '').toLowerCase();
+            return na.localeCompare(nb);
+          });
+
+          // Update count badge
+          var badge = document.getElementById('constituency-count-badge');
+          if (badge) {
+            badge.textContent = query ? (sorted.length + ' of ' + items.filter(function(c) { return c.candidates && c.candidates.length > 0; }).length + ' Constituencies') : ('All ' + sorted.length + ' Constituencies');
+          }
 
           if (sorted.length === 0) {
             container.innerHTML = '<div class="text-center p-12 bg-card border border-border rounded-2xl"><h3 class="text-lg font-bold mb-2">मतगणना सुरू हुन बाँकी</h3><p class="text-muted-foreground">कुनै पनि क्षेत्रको मत विवरण प्राप्त भएको छैन।</p></div>';
@@ -515,7 +545,6 @@ function getStatusText(status: string) {
               '<th class="px-2 sm:px-4 py-2 sm:py-2.5 font-semibold">Constituency</th>' +
               '<th class="px-2 sm:px-4 py-2 sm:py-2.5 font-semibold">Key Candidates</th>' +
               '<th class="px-2 sm:px-4 py-2 sm:py-2.5 font-semibold text-right">Votes Cast</th>' +
-              '<th class="px-2 sm:px-4 py-2 sm:py-2.5 font-semibold text-right hidden sm:table-cell">Voters</th>' +
               '</tr></thead><tbody>';
 
             var rows = sorted.map(function(c) {
@@ -578,9 +607,6 @@ function getStatusText(status: string) {
                 '</td>' +
                 '<td class="px-2 sm:px-4 py-2 sm:py-3 align-top">' + candHtml + '</td>' +
                 '<td class="px-2 sm:px-4 py-2 sm:py-3 align-top text-right">' + votesHtml + pctBar + '</td>' +
-                '<td class="px-2 sm:px-4 py-2 sm:py-3 align-top text-right hidden sm:table-cell">' +
-                  '<span class="font-mono text-sm font-medium text-muted-foreground">' + totalVoters.toLocaleString() + '</span>' +
-                '</td>' +
               '</tr>';
             }).join('');
 
@@ -650,8 +676,24 @@ function getStatusText(status: string) {
           // Find max votes for bar scaling
           var maxVotes = parties[0]?.prVotes || 1;
 
-          // Render parties (show top 15 with votes > 0)
-          var filtered = parties.filter(function(p) { return p.prVotes > 0; }).slice(0, 15);
+          // Show parties with >2% vote share, aggregate rest as "Other"
+          var aboveThreshold = parties.filter(function(p) { return p.prVotes > 0 && (p.voteShare > 2 || (totalVotes > 0 && ((p.prVotes / totalVotes) * 100) > 2)); });
+          var belowThreshold = parties.filter(function(p) { return p.prVotes > 0 && !(p.voteShare > 2 || (totalVotes > 0 && ((p.prVotes / totalVotes) * 100) > 2)); });
+          
+          // Aggregate "Other" parties
+          var otherVotes = 0;
+          belowThreshold.forEach(function(p) { otherVotes += (p.prVotes || 0); });
+          
+          var filtered = aboveThreshold.slice();
+          if (otherVotes > 0) {
+            filtered.push({
+              partyName: 'अन्य (Other)',
+              prVotes: otherVotes,
+              voteShare: totalVotes > 0 ? ((otherVotes / totalVotes) * 100) : 0,
+              _isOther: true,
+              _otherCount: belowThreshold.length
+            });
+          }
           var container = document.getElementById('pr-parties-container');
           if (!container) return;
 
@@ -661,7 +703,7 @@ function getStatusText(status: string) {
             var barWidth = maxVotes > 0 ? ((votes / maxVotes) * 100).toFixed(1) : 0;
             var estSeats = totalVotes > 0 ? Math.round((votes / totalVotes) * TOTAL_PR_SEATS) : 0;
             var color = PR_BAR_COLORS[party.partyName] || '#6b7280';
-            var engName = PR_ENGLISH_NAMES[party.partyName] || party.partyName;
+            var engName = party._isOther ? 'Other (' + party._otherCount + ' parties)' : (PR_ENGLISH_NAMES[party.partyName] || party.partyName);
 
             // Dot color based on rank
             var dotColors = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0d9488', '#ea580c', '#6b7280'];
@@ -703,6 +745,19 @@ function getStatusText(status: string) {
         fetchExternalData();
         fetchPRData();
       });
+      
+      // Setup constituency search
+      var searchInput = document.getElementById('constituency-search');
+      if (searchInput) {
+        var searchTimeout;
+        searchInput.addEventListener('input', function(e) {
+          clearTimeout(searchTimeout);
+          searchTimeout = setTimeout(function() {
+            renderCandidatesList(null, e.target.value);
+          }, 300);
+        });
+      }
+
       console.log('[Polling] Live data polling every ' + (POLLING_INTERVAL/1000) + 's');
       setInterval(function() { fetchExternalData(); fetchPRData(); }, POLLING_INTERVAL);
     </script>
