@@ -99,97 +99,28 @@ function shortParty(p: string) {
   return p.length > 18 ? p.slice(0, 16) + '…' : p;
 }
 
-// ── Featured Constituencies (LIVE from HamroPatro) ──────────
-interface FeaturedConstituency {
-  label: string;
-  labelEn: string;
-  tag: string;
-  totalVoters: number;
-  totalCounted: number;
-  countedPct: number;
-  status: string;
-  candidates: { id: number; name: string; nameEn: string; party: string; votes: number; isWinner: boolean; isLeading: boolean }[];
-}
+// ── FPTP Seats Data ─────────────────────────────────────────
+const { data: fptpData } = await supabase
+  .from('party_summary')
+  .select('party_name, fptp_won')
+  .order('fptp_won', { ascending: false });
 
-let featuredConstituencies: FeaturedConstituency[] = [];
+const fptpSeatsData = (fptpData || [])
+  .filter(p => p.fptp_won > 0)
+  .map(p => ({ name: p.party_name, value: p.fptp_won }));
 
+// ── PR Seats Data ───────────────────────────────────────────
+let prSeatsData: {name: string, value: number}[] = [];
 try {
-  // Step 1: Get all areas
-  const areasRes = await fetch('https://keyvalue.hamropatro.com/kv/get/major-election-2082-areas::-1');
-  if (areasRes.ok) {
-    const areasJson = await areasRes.json();
-    const areas = JSON.parse(areasJson.list[0].value);
-    const areaIds = areas.map((a: any) => a.id);
-
-    // Step 2: Batch fetch area results in chunks of 30 (URL too long for all 165 at once)
-    const CHUNK_SIZE = 30;
-    const allBatchItems: any[] = [];
-    for (let i = 0; i < areaIds.length; i += CHUNK_SIZE) {
-      const chunk = areaIds.slice(i, i + CHUNK_SIZE);
-      const batchKeys = chunk.map((id: string) => `major-election-2082-areas-${id}-result::-1`).join('::');
-      const batchRes = await fetch(`https://keyvalue.hamropatro.com/kv/get/${batchKeys}`);
-      if (batchRes.ok) {
-        const batchJson = await batchRes.json();
-        allBatchItems.push(...batchJson.list);
-      }
-    }
-
-    const allResults: any[] = [];
-    allBatchItems.forEach((item: any) => {
-      try {
-        const r = JSON.parse(item.value);
-        if (r.candidateResults && r.candidateResults.length > 0 && r.totalCountedVotes > 0) {
-          allResults.push(r);
-        }
-      } catch (e) {}
-    });
-
-    // Sort by total counted votes (most active constituencies first)
-    allResults.sort((a, b) => (b.totalCountedVotes || 0) - (a.totalCountedVotes || 0));
-
-    // Take top 6 constituencies
-    const top6 = allResults.slice(0, 6);
-
-    featuredConstituencies = top6.map((r: any) => {
-      const sorted = [...r.candidateResults].sort((a: any, b: any) => (b.votes || 0) - (a.votes || 0));
-      const top2 = sorted.slice(0, 2);
-      const totalVoters = r.registeredVoters || 0;
-      const totalCounted = r.totalCountedVotes || 0;
-      const countedPct = totalVoters > 0 ? Math.round((totalCounted / totalVoters) * 100) : 0;
-      const isDeclared = r.electionResultStatus === 'RESULT_ANNOUNCED';
-
-      let tag = '🗳️ Counting';
-      if (isDeclared) tag = '✅ Result Declared';
-      else if (countedPct >= 80) tag = '🔥 Almost Final';
-      else if (top2.length >= 2 && top2[0].votes > 0 && top2[1].votes > 0) {
-        const margin = top2[0].votes - top2[1].votes;
-        const marginPct = top2[0].votes > 0 ? (margin / top2[0].votes) * 100 : 0;
-        if (marginPct < 5) tag = '⚡ Tight Race';
-        else if (marginPct < 15) tag = '🔥 Close Fight';
-      }
-
-      return {
-        label: `${r.districtName || ''} ${r.areaName || ''}`.trim(),
-        labelEn: `${r.districtEnglishName || ''} ${r.areaNameEnglish || ''}`.trim(),
-        tag,
-        totalVoters,
-        totalCounted,
-        countedPct,
-        status: isDeclared ? 'declared' : 'counting',
-        candidates: top2.map((c: any) => ({
-          id: Number(c.candidateId) || 0,
-          name: c.name || '',
-          nameEn: c.englishName || '',
-          party: c.partyName || '',
-          votes: c.votes || 0,
-          isWinner: c.winner || false,
-          isLeading: sorted.indexOf(c) === 0 && (c.votes || 0) > 0,
-        })),
-      };
-    });
+  const prRes = await fetch('https://pub-4173e04d0b78426caa8cfa525f827daa.r2.dev/pr_parties.json');
+  if (prRes.ok) {
+    const prJson = await prRes.json();
+    prSeatsData = (prJson.parties || [])
+      .filter((p: any) => p.estimatedSeats > 0)
+      .map((p: any) => ({ name: p.partyName, value: p.estimatedSeats }));
   }
 } catch (e) {
-  console.error('[dashboard] Featured constituencies fetch failed:', e);
+  console.error('[dashboard] PR fetch failed:', e);
 }
 ---
 
@@ -324,102 +255,32 @@ try {
         </div>
       </div>
 
-      <!-- ══════════ ROW 3: Live Constituency Results ══════════ -->
-      <div class="mb-8">
+      <!-- ══════════ ROW 3: FPTP and PR Seats Overview ══════════ -->
+      <div class="mb-10">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-xl font-bold text-foreground">🗳️ Live Constituency Results</h2>
-          <a href="/result" class="text-blue-600 text-sm font-medium hover:underline">View all results →</a>
+          <h2 class="text-xl font-bold text-foreground">🏆 Seats Overview</h2>
+          <a href="/result" class="text-blue-600 text-sm font-medium hover:underline">Detailed Results →</a>
         </div>
 
-        {featuredConstituencies.length === 0 ? (
-          <div class="text-center py-12 bg-card border border-border rounded-xl text-muted-foreground">
-            <p class="text-sm">Live constituency results loading...</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <!-- FPTP Seats Chart -->
+          <div class="bg-card border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+            <h3 class="font-semibold text-foreground text-base mb-1">Direct Election (FPTP)</h3>
+            <p class="text-xs text-muted-foreground mb-4">प्रत्यक्ष तर्फ निर्वाचित (१६५ सिट)</p>
+            <div class="h-64 relative">
+              <canvas id="fptpChart"></canvas>
+            </div>
           </div>
-        ) : (
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {featuredConstituencies.map(fc => {
-              const tagColor = fc.tag.includes('Declared') || fc.tag.includes('✅')
-                ? 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 border-green-200 dark:border-green-800'
-                : fc.tag.includes('Tight') || fc.tag.includes('⚡')
-                ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800'
-                : 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800';
 
-              return (
-                <div class="bg-card border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
-                  {/* Header: Location + tag */}
-                  <div class="flex items-center justify-between mb-3">
-                    <div class="flex items-center gap-2">
-                      <span class="text-blue-600 dark:text-blue-400">📍</span>
-                      <span class="font-semibold text-sm text-foreground">{fc.label}</span>
-                    </div>
-                    <span class={`text-[10px] px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${tagColor}`}>
-                      {fc.tag}
-                    </span>
-                  </div>
-
-                  {/* Counted progress */}
-                  <div class="mb-3">
-                    <div class="flex justify-between text-[10px] text-muted-foreground mb-1">
-                      <span>{fc.totalCounted.toLocaleString()} counted</span>
-                      <span>{fc.countedPct}%</span>
-                    </div>
-                    <div class="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
-                      <div class="h-full bg-blue-500 rounded-full transition-all" style={`width: ${Math.min(fc.countedPct, 100)}%`}></div>
-                    </div>
-                  </div>
-
-                  {/* Top 2 Candidates */}
-                  <div class="space-y-2.5">
-                    {fc.candidates.map((c, i) => {
-                      const maxVotes = fc.candidates[0]?.votes || 1;
-                      const barPct = maxVotes > 0 ? Math.round((c.votes / maxVotes) * 100) : 0;
-                      const photoUrl = c.id ? `https://file-r2.hamropatro.com/election-images/2082/candidates/${c.id}.jpg` : null;
-                      const barColor = i === 0
-                        ? (c.isWinner ? 'bg-green-500' : 'bg-blue-500')
-                        : 'bg-slate-400 dark:bg-slate-600';
-
-                      return (
-                        <div class="flex items-center gap-2.5">
-                          {/* Photo */}
-                          <div class="relative h-10 w-10 flex-shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden border border-slate-200 dark:border-slate-700">
-                            <div class="absolute inset-0 flex items-center justify-center text-slate-400 dark:text-slate-500 font-bold text-xs">
-                              {c.name.charAt(0)}
-                            </div>
-                            {photoUrl && (
-                              <img
-                                src={photoUrl}
-                                alt={c.name}
-                                class="featured-photo absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-300"
-                                loading="lazy"
-                              />
-                            )}
-                          </div>
-
-                          {/* Info */}
-                          <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-1.5">
-                              <span class="text-xs font-semibold text-foreground truncate">{c.name}</span>
-                              {c.isWinner && <span class="text-[9px] px-1.5 py-0 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 font-bold border border-green-200 dark:border-green-800 flex-shrink-0">🏆</span>}
-                              {!c.isWinner && c.isLeading && <span class="text-[9px] px-1.5 py-0 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-bold border border-blue-200 dark:border-blue-800 flex-shrink-0">↑</span>}
-                            </div>
-                            <div class="text-[10px] text-muted-foreground truncate">{shortParty(c.party)}</div>
-                            {/* Vote bar */}
-                            <div class="flex items-center gap-2 mt-0.5">
-                              <div class="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
-                                <div class={`h-full rounded-full transition-all ${barColor}`} style={`width: ${barPct}%`}></div>
-                              </div>
-                              <span class="text-[10px] font-bold text-foreground font-mono whitespace-nowrap">{c.votes.toLocaleString()}</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+          <!-- PR Seats Chart -->
+          <div class="bg-card border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
+            <h3 class="font-semibold text-foreground text-base mb-1">Proportional Representation (PR)</h3>
+            <p class="text-xs text-muted-foreground mb-4">समानुपातिक तर्फ सिट (११० सिट)</p>
+            <div class="h-64 relative">
+              <canvas id="prChart"></canvas>
+            </div>
           </div>
-        )}
+        </div>
       </div>
 
       <!-- ══════════ CTA: See All Candidates ══════════ -->
@@ -435,7 +296,7 @@ try {
 
     <Footer />
 
-    <script is:inline define:vars={{ eduData, genderData, partyChartData, totalCandidates }}>
+    <script is:inline define:vars={{ eduData, genderData, partyChartData, totalCandidates, fptpSeatsData, prSeatsData }}>
       document.addEventListener('DOMContentLoaded', function() {
         var COLORS = [
           '#3b82f6','#ef4444','#22c55e','#f59e0b','#8b5cf6',
@@ -453,12 +314,23 @@ try {
           return document.documentElement.classList.contains('dark') ? '#1e293b' : '#fff';
         }
 
+        var shortNames = {
+          "\u0928\u0947\u092a\u093e\u0932\u0940 \u0915\u093e\u0901\u0917\u094d\u0930\u0947\u0938": "\u0915\u093e\u0901\u0917\u094d\u0930\u0947\u0938",
+          "\u0928\u0947\u092a\u093e\u0932 \u0915\u092e\u094d\u092f\u0941\u0928\u093f\u0937\u094d\u091f \u092a\u093e\u0930\u094d\u091f\u0940 (\u090f\u0915\u0940\u0915\u0943\u0924 \u092e\u093e\u0930\u094d\u0915\u094d\u0938\u0935\u093e\u0926\u0940 \u0932\u0947\u0928\u093f\u0928\u0935\u093e\u0926\u0940)": "\u090f\u092e\u093e\u0932\u0947",
+          "\u0928\u0947\u092a\u093e\u0932 \u0915\u092e\u094d\u092f\u0941\u0928\u093f\u0937\u094d\u091f \u092a\u093e\u0930\u094d\u091f\u0940 (\u092e\u093e\u0913\u0935\u093e\u0926\u0940 \u0915\u0947\u0928\u094d\u0926\u094d\u0930)": "\u092e\u093e\u0913\u0935\u093e\u0926\u0940",
+          "\u0930\u093e\u0937\u094d\u091f\u094d\u0930\u093f\u092f \u0938\u094d\u0935\u0924\u0928\u094d\u0924\u094d\u0930 \u092a\u093e\u0930\u094d\u091f\u0940": "\u0930\u093e.\u0938\u094d\u0935.\u092a\u093e.",
+          "\u0930\u093e\u0937\u094d\u091f\u094d\u0930\u093f\u092f \u092a\u094d\u0930\u091c\u093e\u0924\u0928\u094d\u0924\u094d\u0930 \u092a\u093e\u0930\u094d\u091f\u0940": "\u0930\u093e\u092a\u094d\u0930\u092a\u093e",
+          "\u091c\u0928\u0924\u093e \u0938\u092e\u093e\u091c\u0935\u093e\u0926\u0940 \u092a\u093e\u0930\u094d\u091f\u0940, \u0928\u0947\u092a\u093e\u0932": "\u091c\u0938\u092a\u093e",
+          "\u0938\u094d\u0935\u0924\u0928\u094d\u0924\u094d\u0930": "\u0938\u094d\u0935\u0924\u0928\u094d\u0924\u094d\u0930",
+          "\u0905\u0928\u094d\u092f (\u004f\u0074\u0068\u0065\u0072\u0073)": "\u0905\u0928\u094d\u092f",
+        };
+
         var charts = [];
 
         // ── Education Doughnut ──
         var eduCtx = document.getElementById('eduChart');
         if (eduCtx) {
-          new Chart(eduCtx, {
+          var eduChart = new Chart(eduCtx, {
             type: 'doughnut',
             data: {
               labels: eduData.map(function(d){return d.name;}),
@@ -490,7 +362,7 @@ try {
         var genderCtx = document.getElementById('genderChart');
         if (genderCtx) {
           var gColors = ['#3b82f6', '#ec4899', '#94a3b8'];
-          new Chart(genderCtx, {
+          var genderChart = new Chart(genderCtx, {
             type: 'doughnut',
             data: {
               labels: genderData.map(function(d){return d.name;}),
@@ -521,19 +393,9 @@ try {
         // ── Party Horizontal Bar ──
         var partyCtx = document.getElementById('partyChart');
         if (partyCtx) {
-          var shortNames = {
-            "\u0928\u0947\u092a\u093e\u0932\u0940 \u0915\u093e\u0901\u0917\u094d\u0930\u0947\u0938": "\u0915\u093e\u0901\u0917\u094d\u0930\u0947\u0938",
-            "\u0928\u0947\u092a\u093e\u0932 \u0915\u092e\u094d\u092f\u0941\u0928\u093f\u0937\u094d\u091f \u092a\u093e\u0930\u094d\u091f\u0940 (\u090f\u0915\u0940\u0915\u0943\u0924 \u092e\u093e\u0930\u094d\u0915\u094d\u0938\u0935\u093e\u0926\u0940 \u0932\u0947\u0928\u093f\u0928\u0935\u093e\u0926\u0940)": "\u090f\u092e\u093e\u0932\u0947",
-            "\u0928\u0947\u092a\u093e\u0932 \u0915\u092e\u094d\u092f\u0941\u0928\u093f\u0937\u094d\u091f \u092a\u093e\u0930\u094d\u091f\u0940 (\u092e\u093e\u0913\u0935\u093e\u0926\u0940 \u0915\u0947\u0928\u094d\u0926\u094d\u0930)": "\u092e\u093e\u0913\u0935\u093e\u0926\u0940",
-            "\u0930\u093e\u0937\u094d\u091f\u094d\u0930\u093f\u092f \u0938\u094d\u0935\u0924\u0928\u094d\u0924\u094d\u0930 \u092a\u093e\u0930\u094d\u091f\u0940": "\u0930\u093e.\u0938\u094d\u0935.\u092a\u093e.",
-            "\u0930\u093e\u0937\u094d\u091f\u094d\u0930\u093f\u092f \u092a\u094d\u0930\u091c\u093e\u0924\u0928\u094d\u0924\u094d\u0930 \u092a\u093e\u0930\u094d\u091f\u0940": "\u0930\u093e\u092a\u094d\u0930\u092a\u093e",
-            "\u091c\u0928\u0924\u093e \u0938\u092e\u093e\u091c\u0935\u093e\u0926\u0940 \u092a\u093e\u0930\u094d\u091f\u0940, \u0928\u0947\u092a\u093e\u0932": "\u091c\u0938\u092a\u093e",
-            "\u0938\u094d\u0935\u0924\u0928\u094d\u0924\u094d\u0930": "\u0938\u094d\u0935\u0924\u0928\u094d\u0924\u094d\u0930",
-            "\u0905\u0928\u094d\u092f (\u004f\u0074\u0068\u0065\u0072\u0073)": "\u0905\u0928\u094d\u092f",
-          };
           var labels = partyChartData.map(function(d) { return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name); });
 
-          new Chart(partyCtx, {
+          var partyChart = new Chart(partyCtx, {
             type: 'bar',
             data: {
               labels: labels,
@@ -558,6 +420,62 @@ try {
             }
           });
           charts.push(partyChart);
+        }
+
+        // ── FPTP Seats Doughnut ──
+        var fptpCtx = document.getElementById('fptpChart');
+        if (fptpCtx && fptpSeatsData && fptpSeatsData.length > 0) {
+          var fptpChart = new Chart(fptpCtx, {
+            type: 'doughnut',
+            data: {
+              labels: fptpSeatsData.map(function(d){return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);}),
+              datasets: [{
+                data: fptpSeatsData.map(function(d){return d.value;}),
+                backgroundColor: COLORS,
+                borderColor: '#fff', borderWidth: 2
+              }]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false, cutout: '65%',
+              plugins: {
+                legend: { position: 'right', labels: { color: getTextColor(), boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
+                tooltip: {
+                  callbacks: {
+                    label: function(ctx) { return ' ' + ctx.raw + ' Seats'; }
+                  }
+                }
+              }
+            }
+          });
+          charts.push(fptpChart);
+        }
+
+        // ── PR Seats Doughnut ──
+        var prCtx = document.getElementById('prChart');
+        if (prCtx && prSeatsData && prSeatsData.length > 0) {
+          var prChart = new Chart(prCtx, {
+            type: 'doughnut',
+            data: {
+              labels: prSeatsData.map(function(d){return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);}),
+              datasets: [{
+                data: prSeatsData.map(function(d){return d.value;}),
+                backgroundColor: COLORS,
+                borderColor: '#fff', borderWidth: 2
+              }]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false, cutout: '65%',
+              plugins: {
+                legend: { position: 'right', labels: { color: getTextColor(), boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
+                tooltip: {
+                  callbacks: {
+                    label: function(ctx) { return ' ' + ctx.raw + ' Seats'; }
+                  }
+                }
+              }
+            }
+          });
+          charts.push(prChart);
         }
 
         // Apply dark mode overrides dynamically
