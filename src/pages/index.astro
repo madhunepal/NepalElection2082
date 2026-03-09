@@ -424,58 +424,64 @@ try {
 
         // ── FPTP Seats Doughnut ──
         var fptpCtx = document.getElementById('fptpChart');
-        if (fptpCtx && fptpSeatsData && fptpSeatsData.length > 0) {
-          var fptpChart = new Chart(fptpCtx, {
-            type: 'doughnut',
-            data: {
-              labels: fptpSeatsData.map(function(d){return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);}),
-              datasets: [{
-                data: fptpSeatsData.map(function(d){return d.value;}),
-                backgroundColor: COLORS,
-                borderColor: '#fff', borderWidth: 2
-              }]
-            },
-            options: {
-              responsive: true, maintainAspectRatio: false, cutout: '65%',
-              plugins: {
-                legend: { position: 'right', labels: { color: getTextColor(), boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
-                tooltip: {
-                  callbacks: {
-                    label: function(ctx) { return ' ' + ctx.raw + ' Seats'; }
+        if (fptpCtx) {
+          var fptpArr = (typeof fptpSeatsData === 'string') ? JSON.parse(fptpSeatsData) : (fptpSeatsData || []);
+          if (fptpArr.length > 0) {
+            var fptpChart = new Chart(fptpCtx, {
+              type: 'doughnut',
+              data: {
+                labels: fptpArr.map(function(d){return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);}),
+                datasets: [{
+                  data: fptpArr.map(function(d){return d.value;}),
+                  backgroundColor: COLORS,
+                  borderColor: '#fff', borderWidth: 2
+                }]
+              },
+              options: {
+                responsive: true, maintainAspectRatio: false, cutout: '65%',
+                plugins: {
+                  legend: { position: 'right', labels: { color: getTextColor(), boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
+                  tooltip: {
+                    callbacks: {
+                      label: function(ctx) { return ' ' + ctx.raw + ' Seats'; }
+                    }
                   }
                 }
               }
-            }
-          });
-          charts.push(fptpChart);
+            });
+            charts.push(fptpChart);
+          }
         }
 
         // ── PR Seats Doughnut ──
         var prCtx = document.getElementById('prChart');
-        if (prCtx && prSeatsData && prSeatsData.length > 0) {
-          var prChart = new Chart(prCtx, {
-            type: 'doughnut',
-            data: {
-              labels: prSeatsData.map(function(d){return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);}),
-              datasets: [{
-                data: prSeatsData.map(function(d){return d.value;}),
-                backgroundColor: COLORS,
-                borderColor: '#fff', borderWidth: 2
-              }]
-            },
-            options: {
-              responsive: true, maintainAspectRatio: false, cutout: '65%',
-              plugins: {
-                legend: { position: 'right', labels: { color: getTextColor(), boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
-                tooltip: {
-                  callbacks: {
-                    label: function(ctx) { return ' ' + ctx.raw + ' Seats'; }
+        if (prCtx) {
+          var prArr = (typeof prSeatsData === 'string') ? JSON.parse(prSeatsData) : (prSeatsData || []);
+          if (prArr.length > 0) {
+            var prChart = new Chart(prCtx, {
+              type: 'doughnut',
+              data: {
+                labels: prArr.map(function(d){return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);}),
+                datasets: [{
+                  data: prArr.map(function(d){return d.value;}),
+                  backgroundColor: COLORS,
+                  borderColor: '#fff', borderWidth: 2
+                }]
+              },
+              options: {
+                responsive: true, maintainAspectRatio: false, cutout: '65%',
+                plugins: {
+                  legend: { position: 'right', labels: { color: getTextColor(), boxWidth: 10, font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'circle' } },
+                  tooltip: {
+                    callbacks: {
+                      label: function(ctx) { return ' ' + ctx.raw + ' Seats'; }
+                    }
                   }
                 }
               }
-            }
-          });
-          charts.push(prChart);
+            });
+            charts.push(prChart);
+          }
         }
 
         // Apply dark mode overrides dynamically
