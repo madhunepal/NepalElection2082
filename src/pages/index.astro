@@ -423,6 +423,54 @@ try {
           "\u0905\u0928\u094d\u092f (\u004f\u0074\u0068\u0065\u0072\u0073)": "\u0905\u0928\u094d\u092f",
         };
 
+        var partyColors = {
+          "नेपाली काँग्रेस": "#22c55e",
+          "काँग्रेस": "#22c55e", 
+          "नेकपा एमाले": "#ef4444",
+          "एमाले": "#ef4444",
+          "नेपाल कम्युनिष्ट पार्टी (एमाले)": "#ef4444",
+          "माओवादी केन्द्र": "#f59e0b",
+          "नेपाल कम्युनिष्ट पार्टी (माओवादी केन्द्र)": "#f59e0b",
+          "रा.स्व.पा.": "#3b82f6",
+          "राष्ट्रिय स्वतन्त्र पार्टी": "#3b82f6",
+          "राप्रपा": "#eab308",
+          "राष्ट्रिय प्रजातन्त्र पार्टी": "#eab308",
+          "जसपा": "#ec4899",
+          "जनता समाजवादी पार्टी, नेपाल": "#ec4899",
+          "जनमत पार्टी": "#14b8a6",
+          "नेकपा (एकीकृत समाजवादी)": "#8b5cf6",
+          "नागरिक उन्मुक्ति पार्टी": "#f97316",
+          "लोकतान्त्रिक समाजवादी पार्टी नेपाल": "#06b6d4",
+          "नेपाल मजदुर किसान पार्टी": "#be123c",
+          "राष्ट्रिय जनमोर्चा": "#9f1239",
+          "स्वतन्त्र": "#64748b",
+          "अन्य": "#94a3b8"
+        };
+
+        var partySymbols = {
+          "नेपाली काँग्रेस": "🌳",
+          "काँग्रेस": "🌳",
+          "नेकपा एमाले": "☀️",
+          "एमाले": "☀️",
+          "नेपाल कम्युनिष्ट पार्टी (एमाले)": "☀️",
+          "माओवादी केन्द्र": "☭",
+          "नेपाल कम्युनिष्ट पार्टी (माओवादी केन्द्र)": "☭",
+          "रा.स्व.पा.": "🔔",
+          "राष्ट्रिय स्वतन्त्र पार्टी": "🔔",
+          "राप्रपा": "🐄",
+          "राष्ट्रिय प्रजातन्त्र पार्टी": "🐄",
+          "जसपा": "☂️",
+          "जनता समाजवादी पार्टी, नेपाल": "☂️",
+          "जनमत पार्टी": "📢",
+          "नेकपा (एकीकृत समाजवादी)": "🖊️",
+          "नागरिक उन्मुक्ति पार्टी": "🛖",
+          "लोकतान्त्रिक समाजवादी पार्टी नेपाल": "🚲",
+          "नेपाल मजदुर किसान पार्टी": "🪘",
+          "राष्ट्रिय जनमोर्चा": "🥃",
+          "स्वतन्त्र": "🧍",
+          "अन्य": "📦"
+        };
+
         var charts = [];
 
         // ── Education Doughnut ──
@@ -523,9 +571,18 @@ try {
         // ── FPTP Seats Doughnut ──
         var fptpCtx = document.getElementById('fptpChart');
         if (fptpCtx) {
-          var fptpLabels = safeFptp.length > 0 ? safeFptp.map(function(d){return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);}) : ['Yet to start'];
+          var fptpLabels = safeFptp.length > 0 ? safeFptp.map(function(d){
+            var short = shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);
+            var sym = partySymbols[short] || partySymbols[d.name] || '';
+            return sym ? sym + ' ' + short : short;
+          }) : ['Yet to start'];
+          
           var fptpData = safeFptp.length > 0 ? safeFptp.map(function(d){return d.value;}) : [1];
-          var fptpColors = safeFptp.length > 0 ? COLORS : ['#e2e8f0']; // gray-200
+          
+          var fptpColors = safeFptp.length > 0 ? safeFptp.map(function(d, i){
+            var short = shortNames[d.name] || d.name;
+            return partyColors[short] || partyColors[d.name] || COLORS[i % COLORS.length];
+          }) : ['#e2e8f0']; // gray-200
 
           var fptpChart = new Chart(fptpCtx, {
             type: 'doughnut',
@@ -555,9 +612,18 @@ try {
         // ── PR Seats Doughnut ──
         var prCtx = document.getElementById('prChart');
         if (prCtx) {
-          var prLabels = safePr.length > 0 ? safePr.map(function(d){return shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);}) : ['Yet to start'];
+          var prLabels = safePr.length > 0 ? safePr.map(function(d){
+            var short = shortNames[d.name] || (d.name.length > 16 ? d.name.substring(0,14)+'…' : d.name);
+            var sym = partySymbols[short] || partySymbols[d.name] || '';
+            return sym ? sym + ' ' + short : short;
+          }) : ['Yet to start'];
+          
           var prData = safePr.length > 0 ? safePr.map(function(d){return d.value;}) : [1];
-          var prColors = safePr.length > 0 ? COLORS : ['#e2e8f0']; // gray-200
+          
+          var prColors = safePr.length > 0 ? safePr.map(function(d, i){
+            var short = shortNames[d.name] || d.name;
+            return partyColors[short] || partyColors[d.name] || COLORS[i % COLORS.length];
+          }) : ['#e2e8f0']; // gray-200
 
           var prChart = new Chart(prCtx, {
             type: 'doughnut',
